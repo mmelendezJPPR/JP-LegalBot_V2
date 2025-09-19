@@ -82,3 +82,18 @@ tomos_originales_backup*/
 ehthumbs.db
 Thumbs.db
 
+# Project specific cleanup
+RespuestasdePrueba.txt
+*.bak
+*.backup
+*.tmp
+jp_IA_sistema.py
+preguntas_retantes_jp_ia.py
+build.sh
+.env.example
+
+# Development artifacts
+*.log
+test_*.py
+debug_*.py
+
