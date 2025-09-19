@@ -125,18 +125,38 @@ class ExpertoPlanificacion:
     def _embed(self, texts: List[str]) -> np.ndarray:
         """
         Obtiene los embeddings de una lista de textos utilizando el modelo
-        configurado.
+        configurado. Intenta Azure primero, luego OpenAI directo.
 
         Devuelve un array NumPy de forma (len(texts), dim).
         """
         # Recortamos cada input para asegurar que no exceda el tamaño máximo
         # permitido (8000 tokens aproximadamente para text-embedding-3-small).
-        resp = self.client.embeddings.create(
-            model=self.model,
-            input=[t[:8000] for t in texts],
-        )
-        embeddings = [item.embedding for item in resp.data]
-        return np.array(embeddings, dtype=np.float32)
+        try:
+            # Intentar con Azure OpenAI
+            resp = self.client.embeddings.create(
+                model=self.model,
+                input=[t[:8000] for t in texts],
+            )
+            embeddings = [item.embedding for item in resp.data]
+            return np.array(embeddings, dtype=np.float32)
+        except Exception as e:
+            if "DeploymentNotFound" in str(e):
+                logger.warning(f"Modelo de embeddings '{self.model}' no encontrado en Azure. Intentando con OpenAI directo...")
+                # Fallback a OpenAI directo
+                try:
+                    openai_client = OpenAI()
+                    resp = openai_client.embeddings.create(
+                        model="text-embedding-3-small",
+                        input=[t[:8000] for t in texts],
+                    )
+                    embeddings = [item.embedding for item in resp.data]
+                    return np.array(embeddings, dtype=np.float32)
+                except Exception as openai_err:
+                    logger.error(f"Error con OpenAI directo: {openai_err}")
+                    raise
+            else:
+                logger.error(f"Error obteniendo embeddings: {e}")
+                raise
 
     def retrieve(self, query: str, k: int = 8) -> List[Tuple[str, str, float]]:
         """
@@ -262,6 +282,7 @@ def _build_index(docs: List[Dict[str, Any]], model: str) -> np.ndarray:
         logger.info(f"Procesando lote {i//batch_size + 1}: documentos {i+1} a {min(i + batch_size, len(texts))}")
         
         try:
+            # Intentar con Azure OpenAI
             embeddings = client.embeddings.create(
                 model=model,
                 input=batch,
@@ -270,11 +291,29 @@ def _build_index(docs: List[Dict[str, Any]], model: str) -> np.ndarray:
             all_embeddings.extend(batch_vecs)
             
         except Exception as e:
-            logger.error(f"Error procesando lote {i//batch_size + 1}: {e}")
-            # En caso de error, crear embeddings dummy para mantener la estructura
-            dummy_embedding = [0.0] * 1536  # Dimensión típica para text-embedding-3-small
-            for _ in batch:
-                all_embeddings.append(dummy_embedding)
+            if "DeploymentNotFound" in str(e):
+                logger.warning(f"Modelo '{model}' no encontrado en Azure. Intentando con OpenAI directo para lote {i//batch_size + 1}...")
+                try:
+                    # Fallback a OpenAI directo
+                    openai_client = OpenAI()
+                    embeddings = openai_client.embeddings.create(
+                        model="text-embedding-3-small",
+                        input=batch,
+                    ).data
+                    batch_vecs = [item.embedding for item in embeddings]
+                    all_embeddings.extend(batch_vecs)
+                except Exception as openai_err:
+                    logger.error(f"Error con OpenAI directo en lote {i//batch_size + 1}: {openai_err}")
+                    # En caso de error, crear embeddings dummy para mantener la estructura
+                    dummy_embedding = [0.0] * 1536  # Dimensión típica para text-embedding-3-small
+                    for _ in batch:
+                        all_embeddings.append(dummy_embedding)
+            else:
+                logger.error(f"Error procesando lote {i//batch_size + 1}: {e}")
+                # En caso de error, crear embeddings dummy para mantener la estructura
+                dummy_embedding = [0.0] * 1536  # Dimensión típica para text-embedding-3-small
+                for _ in batch:
+                    all_embeddings.append(dummy_embedding)
     
     logger.info(f"Embeddings generados: {len(all_embeddings)}")
     return np.array(all_embeddings, dtype=np.float32)

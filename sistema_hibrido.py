@@ -91,11 +91,12 @@ logger = logging.getLogger(__name__)
 
 # Importar sistema actual (mantienes todo lo que ya tienes)
 try:
-    from experto_planificacion import ExpertoPlanificacion
+    from experto_planificacion import ExpertoPlanificacion, inicializar_experto
     logger.info("[OK] Experto Planificacion importado")
 except ImportError as e:
     logger.error(f"[ERROR] Error importando Experto: {e}")
     ExpertoPlanificacion = None
+    inicializar_experto = None
 
 try:
     from respuestas_curadas_tier1 import inicializar_tier1, buscar_tier1, consulta_dinamica, sistema_respuestas_curadas
@@ -374,59 +375,82 @@ INSPECCIONES REQUERIDAS:
         return '\n\n'.join(contenido_final)
     
     def _generar_respuesta_ia_avanzada(self, consulta: str, analisis: Dict, contenido: str) -> str:
-        """Genera respuesta usando OpenAI de manera conversacional"""
+        """Genera respuesta usando Azure OpenAI de manera conversacional y elaborada"""
         
-        prompt_sistema = f"""Eres JP_IA, un experto conversacional en el Reglamento Conjunto JP-RP-41 de Puerto Rico.
+        # Obtener configuración Azure
+        azure_deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4.1")
+        
+        prompt_sistema = f"""Eres JP_IA, un experto AI conversacional ESPECIALIZADO en legislación de planificación de Puerto Rico.
 
-PERSONALIDAD:
-- Respondes como Claude: inteligente, conversacional, profesional pero accesible
-- Explicas conceptos complejos claramente
-- Usas un tono amigable pero autoritativo
-- Estructuras respuestas en párrafos fluidos
+PERSONALIDAD Y ESTILO:
+- Respondes como un consultor experto: inteligente, conversacional, profesional pero accesible
+- SIEMPRE explicas el razonamiento detrás de cada respuesta
+- Proporcionas contexto histórico y legal cuando es relevante
+- Estructuras respuestas en párrafos fluidos con puntos específicos
+- Usas ejemplos concretos cuando es apropiado
 
-CONOCIMIENTO:
-- Dominas el Reglamento Conjunto JP-RP-41 (12 tomos)
-- Conoces procedimientos de OGPe, JP, AAA, DRNA
-- Entiendes aspectos legales, técnicos y procedimentales
+CONOCIMIENTO ESPECIALIZADO:
+- Dominas completamente el Reglamento Conjunto JP-RP-41 (todos los 12 tomos)
+- Conoces a profundidad los procedimientos de OGPe, JP, AAA, DRNA, municipios
+- Entiendes aspectos legales, técnicos, procedimentales y de política pública
+- Comprendes las interrelaciones entre diferentes agencias y sus competencias
 
-INSTRUCCIONES:
-1. Responde de manera natural y conversacional
-2. Explica el "por qué" además del "qué"  
-3. Proporciona contexto relevante
-4. Menciona consideraciones importantes
-5. Sugiere próximos pasos cuando sea apropiado
+METODOLOGÍA DE RESPUESTA:
+1. ANALIZA la consulta desde múltiples ángulos
+2. EXPLICA el contexto legal y regulatorio relevante
+3. DETALLA los procedimientos específicos paso a paso
+4. IDENTIFICA consideraciones importantes y posibles complicaciones
+5. PROPORCIONA ejemplos prácticos cuando sea útil
+6. SUGIERE próximos pasos concretos y actionables
+7. ANTICIPA preguntas de seguimiento comunes
+
+CRITERIOS DE CALIDAD:
+- Respuestas mínimo 3-4 párrafos sustanciales
+- Incluye referencias específicas a artículos o secciones relevantes
+- Menciona plazos, documentos requeridos, y costos cuando aplicable
+- Considera excepciones o casos especiales
+- Proporciona información de contacto de agencias cuando sea útil
 
 Fecha actual: {datetime.now().strftime('%d de %B de %Y')}"""
 
-        prompt_usuario = f"""CONSULTA: {consulta}
+        prompt_usuario = f"""CONSULTA DEL USUARIO: {consulta}
 
-ANÁLISIS:
-- Tipo: {analisis['tipo_consulta']}
-- Complejidad: {analisis['complejidad']}
-- Entidades: {', '.join(analisis['entidades_detectadas']) if analisis['entidades_detectadas'] else 'Ninguna específica'}
+ANÁLISIS TÉCNICO:
+- Tipo de consulta: {analisis['tipo_consulta']}
+- Nivel de complejidad: {analisis['complejidad']}
+- Entidades gubernamentales involucradas: {', '.join(analisis['entidades_detectadas']) if analisis['entidades_detectadas'] else 'Por determinar según el contexto'}
 
-INFORMACIÓN DEL REGLAMENTO:
-{contenido[:2000]}
+INFORMACIÓN RELEVANTE DEL REGLAMENTO:
+{contenido[:2500]}
 
-Responde como el experto JP_IA conversacional que eres, de manera natural y útil."""
+INSTRUCCIONES ESPECÍFICAS:
+1. Proporciona una respuesta COMPLETA y DETALLADA que demuestre pensamiento profundo
+2. Explica NO SOLO qué hacer, sino POR QUÉ es necesario y CÓMO se relaciona con el marco legal
+3. Incluye consideraciones prácticas que un ciudadano o profesional debe conocer
+4. Anticipa posibles complicaciones o variaciones en el proceso
+5. Sugiere recursos adicionales o próximos pasos específicos
+
+Responde como el experto JP_IA que eres, demostrando análisis profundo y pensamiento crítico."""
 
         try:
+            # Usar el deployment de Azure configurado
             response = self.client.chat.completions.create(
-                model="gpt-4o",
+                model=azure_deployment,  # Usar el deployment de Azure
                 messages=[
                     {"role": "system", "content": prompt_sistema},
                     {"role": "user", "content": prompt_usuario}
                 ],
-                temperature=0.1,
-                max_tokens=1500
+                temperature=0.2,  # Ligeramente más creativo para respuestas elaboradas
+                max_tokens=2000,   # Más tokens para respuestas detalladas
+                top_p=0.95
             )
             
             respuesta = response.choices[0].message.content
-            logger.info("✅ Respuesta IA avanzada generada")
+            logger.info(f"✅ Respuesta IA avanzada generada con {azure_deployment}")
             return respuesta
             
         except Exception as e:
-            logger.error(f"❌ Error con OpenAI: {e}")
+            logger.error(f"❌ Error con Azure OpenAI: {e}")
             return self._generar_respuesta_estructurada(consulta, analisis, contenido)
     
     def _generar_respuesta_estructurada(self, consulta: str, analisis: Dict, contenido: str) -> str:
@@ -501,28 +525,28 @@ def procesar_consulta_hibrida(consulta: str) -> Dict[str, Any]:
     try:
         logger.info(f"🔄 Procesando consulta híbrida: '{consulta[:50]}...'")
         
-        # NIVEL 1: JP_IA Conversacional (NUEVA PRIMERA PRIORIDAD)
-        if jp_ia_conversacional:
+        # NIVEL 1: Mini Especialistas (PRIORIDAD MÁXIMA - Prompts mejorados)
+        if MINI_ESPECIALISTAS_DISPONIBLE:
             try:
-                logger.info("🧠 Intentando con JP_IA Conversacional...")
-                respuesta_jp_ia = jp_ia_conversacional.generar_respuesta_conversacional(consulta)
+                logger.info("🔧 Intentando con Mini Especialistas...")
+                sistema_especialistas = SistemaEspecialistasExpandido()
+                resultado_especialista = sistema_especialistas.procesar_consulta(consulta)
                 
-                if respuesta_jp_ia and len(respuesta_jp_ia) > 50:
+                if resultado_especialista and resultado_especialista.respuesta and len(resultado_especialista.respuesta) > 30:
                     tiempo_procesamiento = time.time() - inicio_tiempo
-                    logger.info(f"✅ JP_IA Conversacional exitoso ({tiempo_procesamiento:.2f}s)")
+                    logger.info(f"✅ Mini Especialistas exitoso")
                     
                     return {
-                        'respuesta': respuesta_jp_ia,
-                        'sistema_usado': 'jp_ia_conversacional',
-                        'confianza': 0.9,
+                        'respuesta': resultado_especialista.respuesta,
+                        'sistema_usado': 'mini_especialistas',
+                        'confianza': resultado_especialista.confianza,
                         'metadata': {
                             'tiempo_procesamiento': tiempo_procesamiento,
-                            'version': jp_ia_conversacional.version,
-                            'tipo_respuesta': 'conversacional_avanzada'
+                            'especialista_usado': resultado_especialista.especialista
                         }
                     }
             except Exception as e:
-                logger.error(f"❌ Error en JP_IA Conversacional: {e}")
+                logger.error(f"❌ Error en Mini Especialistas: {e}")
         
         # NIVEL 2: Tier 1 - Respuestas Curadas (TU SISTEMA ACTUAL)
         if TIER1_DISPONIBLE:
@@ -548,34 +572,35 @@ def procesar_consulta_hibrida(consulta: str) -> Dict[str, Any]:
             except Exception as e:
                 logger.error(f"❌ Error en Tier 1: {e}")
         
-        # NIVEL 3: Mini Especialistas (TU SISTEMA ACTUAL)
-        if MINI_ESPECIALISTAS_DISPONIBLE:
+        # NIVEL 3: JP_IA Conversacional (FALLBACK)
+        if jp_ia_conversacional:
             try:
-                logger.info("🔧 Intentando con Mini Especialistas...")
-                sistema_especialistas = SistemaEspecialistasExpandido()
-                respuesta_especialista = sistema_especialistas.procesar_consulta_completa(consulta)
+                logger.info("🧠 Intentando con JP_IA Conversacional...")
+                respuesta_jp_ia = jp_ia_conversacional.generar_respuesta_conversacional(consulta)
                 
-                if respuesta_especialista and len(respuesta_especialista) > 30:
+                if respuesta_jp_ia and len(respuesta_jp_ia) > 50:
                     tiempo_procesamiento = time.time() - inicio_tiempo
-                    logger.info(f"✅ Mini Especialistas exitoso")
+                    logger.info(f"✅ JP_IA Conversacional exitoso ({tiempo_procesamiento:.2f}s)")
                     
                     return {
-                        'respuesta': respuesta_especialista,
-                        'sistema_usado': 'mini_especialistas',
-                        'confianza': 0.8,
+                        'respuesta': respuesta_jp_ia,
+                        'sistema_usado': 'jp_ia_conversacional',
+                        'confianza': 0.7,  # Menor confianza que mini especialistas
                         'metadata': {
-                            'tiempo_procesamiento': tiempo_procesamiento
+                            'tiempo_procesamiento': tiempo_procesamiento,
+                            'version': jp_ia_conversacional.version,
+                            'tipo_respuesta': 'conversacional_avanzada'
                         }
                     }
             except Exception as e:
-                logger.error(f"❌ Error en Mini Especialistas: {e}")
+                logger.error(f"❌ Error en JP_IA Conversacional: {e}")
         
         # NIVEL 4: Experto General (TU SISTEMA ACTUAL)
-        if ExpertoPlanificacion:
+        if ExpertoPlanificacion and inicializar_experto:
             try:
                 logger.info("🎓 Intentando con Experto General...")
-                experto = ExpertoPlanificacion()
-                respuesta_experto = experto.procesar_consulta_completa(consulta)
+                experto = inicializar_experto()
+                respuesta_experto = experto.answer(consulta)
                 
                 if respuesta_experto and len(respuesta_experto) > 30:
                     tiempo_procesamiento = time.time() - inicio_tiempo
