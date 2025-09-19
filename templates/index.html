@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JP_IA - Junta de Planificación de Puerto Rico</title>
+    <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}" type="image/x-icon">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="main-container">
+        <!-- Sidebar -->
+        <div class="sidebar">
+            <div class="logo-section">
+                <img src="{{ url_for('static', filename='JP_V2.png') }}" alt="Junta de Planificación de Puerto Rico" id="main-logo" onerror="this.style.backgroundImage='url(/static/JPlogo.png)';">
+                <h1>JP_IA EXPERTO</h1>
+                <p>IA Analítica Especializada</p>
+            </div>
+            
+            <!-- Selección de Especialistas -->
+            <div class="specialists-section">
+                <h3><i class="fas fa-users"></i> Especialistas</h3>
+                
+                <!-- Chat General -->
+                <button class="specialist-button active" onclick="seleccionarEspecialista('general')" data-specialist="general">
+                    <div class="specialist-icon">
+                        <i class="fas fa-brain"></i>
+                    </div>
+                    <div class="specialist-info">
+                        <span class="specialist-name">Chat General</span>
+                        <span class="specialist-desc">Análisis completo de todos los reglamentos</span>
+                    </div>
+                </button>
+                
+                <!-- Mini Especialistas -->
+                <button class="specialist-button" onclick="seleccionarEspecialista('procedimientos')" data-specialist="procedimientos">
+                    <div class="specialist-icon">
+                        <i class="fas fa-clipboard-list"></i>
+                    </div>
+                    <div class="specialist-info">
+                        <span class="specialist-name">Procedimientos</span>
+                        <span class="specialist-desc">Procesos administrativos y trámites</span>
+                    </div>
+                </button>
+                
+                <button class="specialist-button" onclick="seleccionarEspecialista('tecnico-grafico')" data-specialist="tecnico-grafico">
+                    <div class="specialist-icon">
+                        <i class="fas fa-drafting-compass"></i>
+                    </div>
+                    <div class="specialist-info">
+                        <span class="specialist-name">Técnico Gráfico</span>
+                        <span class="specialist-desc">Planos, mapas y documentos técnicos</span>
+                    </div>
+                </button>
+                
+                <button class="specialist-button" onclick="seleccionarEspecialista('edificabilidad')" data-specialist="edificabilidad">
+                    <div class="specialist-icon">
+                        <i class="fas fa-building"></i>
+                    </div>
+                    <div class="specialist-info">
+                        <span class="specialist-name">Edificabilidad</span>
+                        <span class="specialist-desc">Construcción y densidad urbana</span>
+                    </div>
+                </button>
+                
+                <button class="specialist-button" onclick="seleccionarEspecialista('zonificacion')" data-specialist="zonificacion">
+                    <div class="specialist-icon">
+                        <i class="fas fa-map-marked-alt"></i>
+                    </div>
+                    <div class="specialist-info">
+                        <span class="specialist-name">Zonificación</span>
+                        <span class="specialist-desc">Clasificación y uso del suelo</span>
+                    </div>
+                </button>
+                
+                <button class="specialist-button" onclick="seleccionarEspecialista('ambiental-infraestructura')" data-specialist="ambiental-infraestructura">
+                    <div class="specialist-icon">
+                        <i class="fas fa-leaf"></i>
+                    </div>
+                    <div class="specialist-info">
+                        <span class="specialist-name">Ambiental</span>
+                        <span class="specialist-desc">Impacto ambiental e infraestructura</span>
+                    </div>
+                </button>
+                
+                <button class="specialist-button" onclick="seleccionarEspecialista('historico')" data-specialist="historico">
+                    <div class="specialist-icon">
+                        <i class="fas fa-landmark"></i>
+                    </div>
+                    <div class="specialist-info">
+                        <span class="specialist-name">Histórico</span>
+                        <span class="specialist-desc">Conservación histórica y cultural</span>
+                    </div>
+                </button>
+                
+                <!-- Botón New Chat -->
+                <div class="separator"></div>
+                <button class="action-button new-chat-button" onclick="iniciarNuevoChat()">
+                    <i class="fas fa-plus"></i> New Chat
+                </button>
+            </div>
+        </div>
+
+        <!-- Chat Section -->
+        <div class="chat-section">
+            <div class="chat-header">
+                <div class="chat-header-content">
+                    <h2 id="specialist-title">
+                        <i class="fas fa-brain"></i> 
+                        <span id="specialist-name">Experto JP_IA</span>
+                    </h2>
+                    <p id="specialist-description">Análisis Inteligente de Reglamentos de Planificación</p>
+                    <div class="status-indicator">
+                        <div class="status-dot"></div>
+                        <span id="specialist-status">Sistema Experto Activo</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div id="chat-container" class="chat-container">
+                <div class="message bot-message">
+                    <div class="message-header">
+                        <div class="message-avatar">
+                            <i class="fas fa-user-graduate"></i>
+                        </div>
+                        <span>Experto JP</span>
+                    </div>
+                    <div class="message-content">
+                        ¡Hola! Soy tu experto en planificación de Puerto Rico. 🎓 Tengo acceso completo a todos los reglamentos y puedo analizar cualquier consulta para darte respuestas precisas y detalladas.
+                        
+                        <div class="ejemplos">
+                            <h4><i class="fas fa-lightbulb"></i> Pregúntame cualquier cosa sobre planificación:</h4>
+                            • <strong>"¿Qué permisos necesito para construir una casa?"</strong> - Análisis específico de requisitos<br>
+                            • <strong>"Explícame el proceso de zonificación"</strong> - Procedimientos detallados paso a paso<br>
+                            • <strong>"¿Cuáles son las regulaciones para sitios históricos?"</strong> - Análisis de conservación<br>
+                            • <strong>"¿Qué agencias están involucradas en X proceso?"</strong> - Mapeo de entidades gubernamentales
+                        </div>
+                        
+                        Puedo analizar cualquier aspecto de los reglamentos de planificación y darte respuestas expertas basadas en datos reales. ¡Pregúntame lo que necesites!
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Typing Indicator -->
+            <div id="typing-indicator" class="message bot-message typing-indicator" style="display: none;">
+                <div class="message-header">
+                    <div class="message-avatar">
+                        <i class="fas fa-user-graduate"></i>
+                    </div>
+                    <span>Experto JP</span>
+                </div>
+                <div class="message-content typing-content">
+                    <div class="typing-animation">
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                    </div>
+                    <div class="typing-text">está escribiendo...</div>
+                </div>
+            </div>
+            
+            <div class="input-section">
+                <div class="input-container">
+                    <div class="input-wrapper">
+                        <input type="text" id="message-input" placeholder="Escribe tu consulta sobre planificación..."
+                               onkeypress="if(event.key==='Enter' && !event.shiftKey) { event.preventDefault(); enviarMensaje(); }">
+                    </div>
+                    <button class="send-button" onclick="enviarMensaje()" title="Enviar mensaje">
+                        <i class="fas fa-paper-plane"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
