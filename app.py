@@ -186,17 +186,35 @@ def signal_handler(signum, frame):
 signal.signal(signal.SIGTERM, signal_handler)
 signal.signal(signal.SIGINT, signal_handler)
 
-# Cliente OpenAI con manejo de errores
+# Cliente OpenAI con manejo de errores (Azure y estándar)
 try:
-    api_key = os.getenv("OPENAI_API_KEY")
-    if api_key and api_key.strip():
-        client = openai.OpenAI(api_key=api_key, timeout=OPENAI_TIMEOUT)
-        logger.info("[OK] Cliente OpenAI configurado correctamente")
+    # Verificar si Azure OpenAI está configurado
+    azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+    azure_key = os.getenv("AZURE_OPENAI_KEY")
+    azure_api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview")
+    
+    if azure_endpoint and azure_key:
+        # Usar Azure OpenAI
+        client = openai.AzureOpenAI(
+            api_version=azure_api_version,
+            azure_endpoint=azure_endpoint,
+            api_key=azure_key,
+            timeout=OPENAI_TIMEOUT
+        )
+        logger.info("✅ Cliente Azure OpenAI configurado correctamente")
+        logger.info(f"   📡 Endpoint: {azure_endpoint}")
+        logger.info(f"   🚀 Deployment: {os.getenv('AZURE_OPENAI_DEPLOYMENT_NAME', 'gpt-4.1')}")
     else:
-        logger.warning("[WARNING] No hay API key de OpenAI configurada")
-        client = None
+        # Fallback a OpenAI estándar
+        api_key = os.getenv("OPENAI_API_KEY")
+        if api_key and api_key.strip():
+            client = openai.OpenAI(api_key=api_key, timeout=OPENAI_TIMEOUT)
+            logger.info("✅ Cliente OpenAI estándar configurado correctamente")
+        else:
+            logger.warning("⚠️ No hay API key configurada (ni Azure ni OpenAI)")
+            client = None
 except Exception as e:
-    logger.error(f"[ERROR] Error configurando OpenAI: {e}")
+    logger.error(f"❌ Error configurando cliente OpenAI: {e}")
     client = None
 
 # Importar el sistema de autenticación simple

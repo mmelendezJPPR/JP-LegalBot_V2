@@ -78,10 +78,10 @@ from typing import List, Tuple, Optional, Dict, Any
 import numpy as np
 
 try:
-    # Intentamos importar el cliente de OpenAI. Si no está disponible, se
+    # Intentamos importar el cliente de OpenAI y Azure OpenAI. Si no está disponible, se
     # lanzará una excepción en tiempo de ejecución cuando se llame a las
     # funciones que lo utilizan.
-    from openai import OpenAI
+    from openai import OpenAI, AzureOpenAI
 except ImportError as err:
     raise ImportError(
         "No se pudo importar la biblioteca openai. Añádala a su "
@@ -103,7 +103,24 @@ class ExpertoPlanificacion:
         # Pre-normalizamos el índice para acelerar la similitud coseno.
         norm = np.linalg.norm(self.index, axis=1, keepdims=True) + 1e-8
         self.index_norm = self.index / norm
-        self.client = OpenAI()
+        
+        # Configurar cliente OpenAI (Azure o estándar)
+        azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+        azure_key = os.getenv("AZURE_OPENAI_KEY")
+        azure_api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview")
+        
+        if azure_endpoint and azure_key:
+            # Usar Azure OpenAI
+            self.client = AzureOpenAI(
+                api_version=azure_api_version,
+                azure_endpoint=azure_endpoint,
+                api_key=azure_key,
+            )
+            logger.info("✅ Cliente Azure OpenAI configurado para ExpertoPlanificacion")
+        else:
+            # Fallback a OpenAI estándar
+            self.client = OpenAI()
+            logger.info("✅ Cliente OpenAI estándar configurado para ExpertoPlanificacion")
 
     def _embed(self, texts: List[str]) -> np.ndarray:
         """
@@ -160,8 +177,13 @@ class ExpertoPlanificacion:
                 "content": f"Pregunta: {pregunta}\n\nCONTEXTO:\n{contexto}",
             },
         ]
+        
+        # Usar deployment de Azure si está configurado, sino usar el modelo estándar
+        azure_deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME")
+        model_to_use = azure_deployment if azure_deployment else self.chat_model
+        
         completion = self.client.chat.completions.create(
-            model=self.chat_model,
+            model=model_to_use,
             messages=messages,
         )
         return completion.choices[0].message.content
@@ -209,7 +231,23 @@ def _build_index(docs: List[Dict[str, Any]], model: str) -> np.ndarray:
     
     Para manejar límites de tokens de OpenAI, procesa los documentos en lotes.
     """
-    client = OpenAI()
+    # Configurar cliente OpenAI (Azure o estándar)
+    azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+    azure_key = os.getenv("AZURE_OPENAI_KEY")
+    azure_api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview")
+    
+    if azure_endpoint and azure_key:
+        # Usar Azure OpenAI
+        client = AzureOpenAI(
+            api_version=azure_api_version,
+            azure_endpoint=azure_endpoint,
+            api_key=azure_key,
+        )
+        logger.info("✅ Cliente Azure OpenAI configurado para _build_index")
+    else:
+        # Fallback a OpenAI estándar
+        client = OpenAI()
+        logger.info("✅ Cliente OpenAI estándar configurado para _build_index")
     
     # Preparar textos limitando la longitud para evitar excepciones
     texts = [doc["text"][:4000] for doc in docs]  # Reducir de 8000 a 4000 para más seguridad

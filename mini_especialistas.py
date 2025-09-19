@@ -107,6 +107,31 @@ except ImportError:
     EXPERTO_DISPONIBLE = False
     print("[WARNING] Experto de planificacion no disponible - funcionando sin constructor de contexto")
 
+def crear_cliente_openai():
+    """Función auxiliar para crear cliente OpenAI (Azure o estándar)"""
+    import openai
+    import os
+    
+    # Configurar cliente OpenAI (Azure o estándar)
+    azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+    azure_key = os.getenv("AZURE_OPENAI_KEY")
+    azure_api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview")
+    
+    if azure_endpoint and azure_key:
+        # Usar Azure OpenAI
+        client = openai.AzureOpenAI(
+            api_version=azure_api_version,
+            azure_endpoint=azure_endpoint,
+            api_key=azure_key,
+        )
+        model_to_use = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4.1")
+    else:
+        # Fallback a OpenAI estándar
+        client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        model_to_use = "gpt-4o-mini"
+    
+    return client, model_to_use
+
 class TipoConsulta(Enum):
     PROCEDIMIENTO = "procedimiento"
     CALCULO = "calculo"
@@ -178,10 +203,7 @@ class EspecialistaProcedimientos(MiniEspecialistaBase):
         
         # Intentar usar OpenAI para respuesta dinámica
         try:
-            import openai
-            import os
-            
-            client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+            client, model_to_use = crear_cliente_openai()
             
             # 🔥 NUEVA FUNCIONALIDAD: Construir contexto enriquecido
             contexto_enriquecido = ""
@@ -237,7 +259,7 @@ Reglas:
 - Máximo 3-6 líneas de respuesta para ser conciso"""
 
             response = client.chat.completions.create(
-                model="gpt-4o-mini",
+                model=model_to_use,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": prompt}
@@ -362,10 +384,7 @@ class EspecialistaTecnicoGrafico(MiniEspecialistaBase):
         """Generar respuesta usando formato robusto con fuentes obligatorias"""
         try:
             # Nuevo formato estructurado según recomendaciones ChatGPT
-            import os
-            import openai
-            
-            client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+            client, model_to_use = crear_cliente_openai()
             
             # Template estructurado según recomendaciones
             user_prompt = f"""
@@ -397,7 +416,7 @@ Reglas:
 - Respuesta directa máximo 6 líneas, luego citas compactas."""
 
             response = client.chat.completions.create(
-                model="gpt-4o-mini",
+                model=model_to_use,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
@@ -843,7 +862,7 @@ Reglas:
 - Máximo 3-6 líneas de respuesta para ser conciso"""
 
             response = client.chat.completions.create(
-                model="gpt-4o-mini",
+                model=model_to_use,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": prompt}
