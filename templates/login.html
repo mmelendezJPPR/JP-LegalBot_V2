@@ -120,10 +120,24 @@
             color: #3498db;
             text-decoration: none;
             font-size: 14px;
+            display: inline-block;
+            margin: 5px 0;
         }
         
         .back-link a:hover {
             text-decoration: underline;
+        }
+        
+        .change-password-link {
+            color: #e74c3c !important;
+            text-decoration: none;
+            font-size: 14px;
+            font-weight: 500;
+        }
+        
+        .change-password-link:hover {
+            text-decoration: underline;
+            color: #c0392b !important;
         }
     </style>
 </head>
@@ -168,9 +182,12 @@
             </button>
         </form>
         
-        
         <div class="back-link">
             <a href="{{ url_for('index') }}">← Volver al inicio</a>
+            <br>
+            <a href="{{ url_for('static', filename='ChangePassword.html') }}" class="change-password-link">
+                🔑 Cambiar Contraseña
+            </a>
         </div>
     </div>
     

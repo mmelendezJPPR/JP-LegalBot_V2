@@ -38,7 +38,7 @@ APP.PY - APLICACIÓN PRINCIPAL DEL JP_LEGALBOT v3.2
    - Manejo graceful de shutdown
 
 ⚙️ CONFIGURACIÓN:
-   - Puerto: 10000 (configurable via PORT env var)
+   - Puerto: 5000 (configurable via PORT env var)
    - Debug: Deshabilitado en producción
    - Rate limit: 30 requests/minuto por IP
    - Session timeout: 1 hora
@@ -106,7 +106,7 @@ def validar_variables_entorno():
         warnings.append("SECRET_KEY corto - Se generará uno automáticamente")
     
     try:
-        port = int(os.getenv('PORT', '10000'))
+        port = int(os.getenv('PORT', '5000'))
         if port < 1024 or port > 65535:
             errores.append(f"PORT inválido: {port}")
     except ValueError:
@@ -219,7 +219,7 @@ except Exception as e:
 
 # Importar el sistema de autenticación simple
 try:
-    from simple_auth import login_user, is_logged_in, login_required
+    from simple_auth import login_user, is_logged_in, login_required, simple_auth
     logger.info("[OK] Sistema de autenticacion importado")
     auth_disponible = True
 except ImportError as e:
@@ -636,6 +636,165 @@ def logout():
     logger.info(f"🔤 Logout: {username}")
     return redirect(url_for('login_page'))
 
+@app.route('/change-password-complete')
+@app.route('/change_password_complete')
+@app.route('/cambiar-password-complete')
+@app.route('/cambiar_password_complete')
+def change_password_complete():
+    """Página de confirmación de cambio de contraseña exitoso"""
+    from datetime import datetime
+    
+    # Obtener datos de la sesión o parámetros URL
+    username = request.args.get('username', session.get('username', 'Usuario'))
+    method = request.args.get('method', 'Base de datos principal')
+    timestamp = datetime.now().strftime('%d/%m/%Y %H:%M:%S')
+    
+    return render_template('ChangePasswordComplete.html', 
+                         username=username,
+                         method=method,
+                         timestamp=timestamp)
+
+@app.route('/change-password', methods=['GET', 'POST'])
+@app.route('/change_password', methods=['GET', 'POST'])
+@app.route('/cambiar-password', methods=['GET', 'POST'])
+@app.route('/cambiar_password', methods=['GET', 'POST'])
+def change_password():
+    """Página de cambio de contraseña"""
+    if request.method == 'GET':
+        return render_template('ChangePassword.html')
+    
+    # Procesar POST - cambio de contraseña
+    username = request.form.get('username', '').strip()
+    current_password = request.form.get('current_password', '')
+    new_password = request.form.get('new_password', '')
+    confirm_password = request.form.get('confirm_password', '')
+    
+    # Validaciones básicas
+    if not all([username, current_password, new_password, confirm_password]):
+        flash('❌ Todos los campos son obligatorios', 'error')
+        return render_template('ChangePassword.html')
+    
+    if new_password != confirm_password:
+        flash('❌ Las contraseñas nuevas no coinciden', 'error')
+        return render_template('ChangePassword.html')
+    
+    if current_password == new_password:
+        flash('⚠️ La nueva contraseña debe ser diferente a la actual', 'warning')
+        return render_template('ChangePassword.html')
+    
+    try:
+        # Primero verificar que el usuario y contraseña actual sean correctos
+        auth_result = simple_auth.authenticate(username, current_password)
+        
+        if not auth_result.get('success', False):
+            logger.warning(f"❌ Autenticación falló para {username}")
+            flash('❌ Usuario o contraseña actual incorrectos', 'error')
+            return render_template('ChangePassword.html')
+        
+        # 🎯 Estrategia de actualización dual para máxima persistencia
+        success_database = update_password_in_database(username, new_password)
+        success_local = update_password_in_local_system(username, new_password)
+        
+        if success_database:
+            logger.info(f"✅ Contraseña actualizada en BD SQL Server para: {username}")
+            if success_local:
+                logger.info(f"✅ Contraseña también sincronizada localmente para: {username}")
+            # Redirigir a página de confirmación
+            return redirect(url_for('change_password_complete', 
+                                  username=username, 
+                                  method='Base de datos principal + Sistema local'))
+        elif success_local:
+            logger.warning(f"⚠️ BD no disponible - Contraseña actualizada solo localmente para: {username}")
+            # Redirigir a página de confirmación
+            return redirect(url_for('change_password_complete', 
+                                  username=username, 
+                                  method='Sistema local (BD no disponible)'))
+        else:
+            logger.error(f"❌ Error actualizando contraseña en ambos sistemas para: {username}")
+            flash('❌ Error al actualizar contraseña. Intente nuevamente.', 'error')
+            return render_template('ChangePassword.html')
+        
+    except Exception as e:
+        logger.error(f"❌ Error al cambiar contraseña para {username}: {str(e)}")
+        flash('❌ Error interno del servidor. Intente nuevamente.', 'error')
+        return render_template('ChangePassword.html')
+
+def update_password_in_database(username, new_password):
+    """
+    Actualiza la contraseña en la base de datos SQL Server
+    Returns: True si exitoso, False si falla
+    """
+    try:
+        import pyodbc
+        
+        # Configuración de conexión
+        server = "jppr.database.windows.net"
+        database = "HidrologiaDB"
+        username_db = "jpai"
+        password_db = "JuntaAI@2025"
+        
+        # Crear conexión
+        connection_string = f"DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={server};DATABASE={database};UID={username_db};PWD={password_db}"
+        conn = pyodbc.connect(connection_string)
+        cursor = conn.cursor()
+        
+        # Verificar que el usuario existe
+        cursor.execute("SELECT username FROM Users WHERE username = ?", (username,))
+        user_exists = cursor.fetchone()
+        
+        if not user_exists:
+            logger.warning(f"⚠️ Usuario {username} no encontrado en la base de datos")
+            conn.close()
+            return False
+        
+        # Ejecutar UPDATE
+        update_query = "UPDATE Users SET password = ? WHERE username = ?"
+        cursor.execute(update_query, (new_password, username))
+        rows_affected = cursor.rowcount
+        
+        # Confirmar cambios
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        if rows_affected > 0:
+            logger.info(f"✅ Contraseña actualizada en BD para {username}")
+            return True
+        else:
+            logger.warning(f"⚠️ No se pudo actualizar la contraseña para {username}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"❌ Error de BD al actualizar contraseña para {username}: {str(e)}")
+        return False
+
+def update_password_in_local_system(username, new_password):
+    """
+    Actualiza la contraseña en el sistema local de fallback
+    """
+    try:
+        # Actualizar en el diccionario local del sistema de autenticación
+        if hasattr(simple_auth, 'local_users'):
+            simple_auth.local_users[username] = new_password
+            logger.info(f"✅ Contraseña local actualizada para {username}")
+        else:
+            # Si no existe, crear el diccionario
+            if not hasattr(simple_auth, 'local_users'):
+                simple_auth.local_users = {}
+            simple_auth.local_users[username] = new_password
+            logger.info(f"✅ Usuario {username} agregado al sistema local")
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ Error actualizando contraseña local: {str(e)}")
+        return False
+
+@app.route('/static/ChangePassword.html')
+def static_change_password_redirect():
+    """Redirección para manejar URLs en caché del navegador"""
+    return redirect(url_for('change_password'))
+
 # ===== RUTAS DE API =====
 
 @app.route('/api/stats')
@@ -789,8 +948,8 @@ if __name__ == '__main__':
         print(f"   👤 Usuario: Admin911")
         print(f"   🔐 Contraseña: Junta12345")
     
-    # Puerto para producción (Render)
-    port = int(os.getenv('PORT', 10000))
+    # Puerto para desarrollo local
+    port = int(os.getenv('PORT', 5000))
     debug_mode = os.getenv('FLASK_DEBUG', 'False').lower() == 'true'
     
     print(f"\n🌐 Servidor:")

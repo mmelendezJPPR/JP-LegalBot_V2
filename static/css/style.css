@@ -2463,3 +2463,15 @@ img#main-logo[src=""], img#main-logo:not([src]) {
 img#main-logo[src=""]::after, img#main-logo:not([src])::after {
     display: block !important;
 }
+
+        .change-password-link {
+            color: #e74c3c;
+            text-decoration: none;
+            font-size: 14px;
+            font-weight: 500;
+        }
+        
+        .change-password-link:hover {
+            text-decoration: underline;
+            color: #c0392b;
+        }

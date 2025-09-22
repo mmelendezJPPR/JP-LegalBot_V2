@@ -69,7 +69,7 @@ class SimpleAuth:
     """Autenticación simple para JP_IA con fallback"""
     
     def __init__(self):
-        # Configuración de conexión
+        # Configuración de conexión (CORREGIDA PARA USAR LA QUE FUNCIONA)
         self.server = os.getenv('SQL_SERVER', 'jppr.database.windows.net')
         self.database = os.getenv('SQL_DATABASE', 'HidrologiaDB')
         self.username = os.getenv('SQL_USERNAME', 'jpai')
@@ -77,20 +77,68 @@ class SimpleAuth:
         
         self.connection_string = f'DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={self.server};DATABASE={self.database};UID={self.username};PWD={self.password}'
         
-        # Usuarios locales de fallback
+        # Usuarios locales de fallback inicial (SIN HASH - TEXTO PLANO)
         self.local_users = {
-            'Admin911': self._hash_password('Junta12345'),
-            'admin': self._hash_password('123'),
-            'demo': self._hash_password('demo123')
+            'Admin911': 'Junta12345',
+            'admin': '123',
+            'demo': 'demo123',
+            'alvarez_o@jp.pr.gov': 'LegalBot12345',
+            'valdez_j@jp.pr.gov': 'LegalBot6789'
         }
+        
+        # 🔄 Sincronizar contraseñas desde SQL Server al iniciar
+        self._sync_passwords_from_database()
+        
+        print("✅ Sistema de autenticación inicializado")
+        print(f"📊 Usuarios locales: {list(self.local_users.keys())}")
+    
+    def _sync_passwords_from_database(self):
+        """Sincroniza contraseñas locales con las de la base de datos"""
+        try:
+            conn = self._get_connection()
+            if not conn:
+                print("⚠️ SQL Server no disponible - usando contraseñas por defecto")
+                return
+            
+            cursor = conn.cursor()
+            
+            # Obtener todas las contraseñas actualizadas desde SQL Server
+            cursor.execute("SELECT username, password FROM Users")
+            db_users = cursor.fetchall()
+            
+            # Actualizar usuarios locales con contraseñas de la BD
+            users_synced = 0
+            for username, password in db_users:
+                if username in self.local_users:
+                    old_password = self.local_users[username]
+                    self.local_users[username] = password
+                    if old_password != password:
+                        print(f"🔄 Contraseña sincronizada para {username}")
+                        users_synced += 1
+                else:
+                    # Agregar nuevos usuarios de la BD al sistema local
+                    self.local_users[username] = password
+                    print(f"➕ Nuevo usuario agregado: {username}")
+                    users_synced += 1
+            
+            if users_synced > 0:
+                print(f"✅ {users_synced} contraseñas sincronizadas desde SQL Server")
+            else:
+                print("ℹ️ Contraseñas locales están actualizadas")
+            
+            conn.close()
+            
+        except Exception as e:
+            print(f"⚠️ Error sincronizando contraseñas: {e}")
+            print("📋 Continuando con contraseñas por defecto")
     
     def _get_connection(self):
         """Obtiene conexión a la base de datos"""
         try:
             return pyodbc.connect(self.connection_string)
         except Exception as e:
-            print(f"⚠️ Error conectando a SQL Server: {e}")
-            print("🔄 Usando autenticación local como fallback")
+            print(f"ERROR conectando a SQL Server: {e}")
+            print("Usando autenticacion local como fallback")
             return None
     
     def _hash_password(self, password: str) -> str:
@@ -98,11 +146,10 @@ class SimpleAuth:
         return hashlib.sha256(password.encode()).hexdigest()
     
     def _authenticate_local(self, username: str, password: str) -> Dict:
-        """Autenticación local de fallback"""
-        hashed_password = self._hash_password(password)
+        """Autenticación local de fallback (SIN HASH - TEXTO PLANO)"""
         
-        if username in self.local_users and self.local_users[username] == hashed_password:
-            print(f"✅ Autenticación local exitosa para: {username}")
+        if username in self.local_users and self.local_users[username] == password:
+            print(f"AUTENTICACION LOCAL EXITOSA para: {username}")
             return {
                 'success': True,
                 'message': f'Login exitoso (modo local)',
@@ -114,7 +161,7 @@ class SimpleAuth:
                 }
             }
         else:
-            print(f"❌ Autenticación local fallida para: {username}")
+            print(f"AUTENTICACION LOCAL FALLIDA para: {username}")
             return {
                 'success': False,
                 'message': 'Usuario o contraseña incorrectos'
@@ -127,11 +174,11 @@ class SimpleAuth:
         Returns:
             Dict con 'success' (bool), 'message' (str) y 'user' (dict si exitoso)
         """
-        print(f"🔐 Intentando autenticar usuario: {username}")
+        print(f"INTENTANDO AUTENTICAR USUARIO: {username}")
         
         conn = self._get_connection()
         if not conn:
-            print("🔄 SQL Server no disponible, usando autenticación local")
+            print("SQL Server no disponible, usando autenticacion local")
             return self._authenticate_local(username, password)
         
         try:
@@ -142,14 +189,14 @@ class SimpleAuth:
             user = cursor.fetchone()
             
             if not user:
-                print(f"⚠️ Usuario '{username}' no encontrado en BD, probando fallback local")
+                print(f"Usuario '{username}' no encontrado en BD, probando fallback local")
                 return self._authenticate_local(username, password)
             
-            # Verificar contraseña
-            password_hash = self._hash_password(password)
+            # Verificar contraseña (SIN HASH - TEXTO PLANO)
+            # Comparación directa sin hash
             
-            if user[2] == password_hash:
-                print(f"✅ Autenticación SQL exitosa para: {username}")
+            if user[2] == password:
+                print(f"AUTENTICACION SQL EXITOSA para: {username}")
                 return {
                     'success': True,
                     'message': 'Autenticación exitosa (SQL Server)',
@@ -162,12 +209,12 @@ class SimpleAuth:
                     }
                 }
             else:
-                print(f"❌ Contraseña incorrecta para: {username} en BD, probando fallback")
+                print(f"Contraseña incorrecta para: {username} en BD, probando fallback")
                 return self._authenticate_local(username, password)
                 
         except Exception as e:
-            print(f"❌ Error durante autenticación SQL: {e}")
-            print("🔄 Usando autenticación local como fallback")
+            print(f"Error durante autenticacion SQL: {e}")
+            print("Usando autenticacion local como fallback")
             return self._authenticate_local(username, password)
         finally:
             conn.close()
