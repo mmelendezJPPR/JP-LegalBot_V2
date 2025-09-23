@@ -1,12 +1,32 @@
 import os, json, numpy as np, faiss
 from typing import List, Dict
-from openai import OpenAI
-from config import OPENAI_API_KEY, MODEL_EMBED, DB_PATH, FAISS_PATH
+from openai import AzureOpenAI, OpenAI
+from config import (
+    AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_KEY, AZURE_OPENAI_API_VERSION,
+    AZURE_OPENAI_EMBEDDING_DEPLOYMENT, DB_PATH, FAISS_PATH, OPENAI_API_KEY
+)
 from db import get_conn, fts_search
 
 class HybridRetriever:
     def __init__(self, db_path=DB_PATH, faiss_path=FAISS_PATH):
-        self.client = OpenAI(api_key=OPENAI_API_KEY)
+        # Configurar Azure OpenAI para chat
+        self.azure_client = AzureOpenAI(
+            api_key=AZURE_OPENAI_KEY,
+            api_version=AZURE_OPENAI_API_VERSION,
+            azure_endpoint=AZURE_OPENAI_ENDPOINT
+        )
+        
+        # Configurar OpenAI para embeddings (fallback)
+        self.openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
+        
+        # Decidir qué usar para embeddings
+        self.use_azure_embeddings = bool(AZURE_OPENAI_EMBEDDING_DEPLOYMENT)
+        if self.use_azure_embeddings:
+            self.embedding_client = self.azure_client
+            self.embedding_model = AZURE_OPENAI_EMBEDDING_DEPLOYMENT
+        else:
+            self.embedding_client = self.openai_client
+            self.embedding_model = "text-embedding-3-small"
         self.db_path = db_path
         self.faiss_path = faiss_path
         self.index = faiss.read_index(self.faiss_path)
@@ -14,7 +34,7 @@ class HybridRetriever:
         self.metas = [json.loads(l) for l in open(metas_path, "r", encoding="utf-8")]
 
     def embed(self, text: str) -> np.ndarray:
-        e = self.client.embeddings.create(model=MODEL_EMBED, input=[text]).data[0].embedding
+        e = self.client.embeddings.create(model=AZURE_OPENAI_EMBEDDING_DEPLOYMENT, input=[text]).data[0].embedding
         v = np.array([e], dtype="float32")
         faiss.normalize_L2(v)
         return v

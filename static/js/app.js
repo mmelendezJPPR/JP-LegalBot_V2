@@ -34,9 +34,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // ===== CONFIGURACIÓN DE EVENTOS =====
 function setupEventListeners() {
-    // Input de mensaje
+    // Input de mensaje (ajustado a HTML existente)
     const messageInput = document.getElementById('messageInput');
-    const sendButton = document.getElementById('sendButton');
+    // En el HTML el botón tiene clase "send-btn" y no el id sendButton
+    const sendButton = document.querySelector('.send-btn');
     
     if (messageInput) {
         messageInput.addEventListener('keydown', handleKeyDown);
@@ -48,28 +49,31 @@ function setupEventListeners() {
         sendButton.addEventListener('click', sendMessage);
     }
     
-    // Navegación de especialistas
-    document.querySelectorAll('.nav-link').forEach(link => {
+    // Navegación de especialistas (en el HTML usan .specialist-btn)
+    document.querySelectorAll('.specialist-btn').forEach(link => {
         link.addEventListener('click', function() {
             const specialist = this.dataset.specialist;
-            switchSpecialist(specialist);
+            if (specialist) switchSpecialist(specialist);
         });
     });
     
     // Toggle móvil
-    const mobileToggle = document.getElementById('mobileToggle');
-    const sidebarOverlay = document.getElementById('sidebarOverlay');
-    
+    // Botón y overlay móvil en el HTML tienen clases/IDs distintos
+    const mobileToggle = document.querySelector('.mobile-menu-btn');
+    const sidebarOverlay = document.getElementById('mobileOverlay');
+
     if (mobileToggle) {
-        mobileToggle.addEventListener('click', toggleSidebar);
+        // algunas plantillas usan onclick inline, aquí aseguramos behavior adicional
+        mobileToggle.addEventListener('click', toggleSidebarSafe);
     }
-    
+
     if (sidebarOverlay) {
-        sidebarOverlay.addEventListener('click', closeSidebar);
+        sidebarOverlay.addEventListener('click', toggleSidebarSafe);
     }
     
     // Auto-scroll al hacer scroll
-    const chatContainer = document.getElementById('chatContainer');
+    // En las plantillas el contenedor de mensajes se llama messagesContainer
+    const chatContainer = document.getElementById('messagesContainer') || document.getElementById('chatContainer');
     if (chatContainer) {
         chatContainer.addEventListener('scroll', handleChatScroll);
     }
@@ -102,6 +106,61 @@ function handleKeyDown(e) {
     }
 }
 
+// --- Funciones expuestas para compatibilidad con el HTML inline ---
+// Alias seguro para el manejo de la tecla Enter usado en templates
+function handleKeyPress(e) {
+    if (!e) return;
+    handleKeyDown(e);
+}
+
+// Toggle seguro para sidebar/mobile - algunas plantillas llaman toggleMobileMenu()
+function toggleSidebarSafe() {
+    const sidebar = document.querySelector('.sidebar');
+    const overlay = document.getElementById('mobileOverlay');
+    if (!sidebar || !overlay) return;
+
+    sidebar.classList.toggle('active');
+    overlay.classList.toggle('active');
+}
+
+// Mantener nombres esperados por templates
+window.toggleMobileMenu = toggleSidebarSafe;
+window.toggleSidebar = toggleSidebarSafe;
+window.handleKeyPress = handleKeyPress;
+// Exponer sendMessage globalmente por el onclick inline
+window.sendMessage = sendMessage;
+window.newChat = newChat;
+window.quickQuery = quickQuery;
+
+// ===== FUNCIONES AUXILIARES =====
+function newChat() {
+    // Limpiar el chat actual
+    const chatContainer = document.getElementById('chatContainer');
+    if (chatContainer) {
+        chatContainer.innerHTML = '';
+    }
+    
+    // Mostrar mensaje de bienvenida
+    showWelcomeMessage();
+    
+    // Limpiar input
+    clearInput();
+    
+    // Reiniciar estado
+    AppState.chatHistory = [];
+    AppState.currentSessionId = generateSessionId();
+    
+    console.log('🔄 Nueva conversación iniciada');
+}
+
+function quickQuery(query) {
+    const input = document.getElementById('messageInput');
+    if (input) {
+        input.value = query;
+        sendMessage();
+    }
+}
+
 function handleInputChange() {
     autoResizeTextarea();
     updateSendButton();
@@ -130,14 +189,15 @@ function handlePaste(e) {
 function autoResizeTextarea() {
     const textarea = document.getElementById('messageInput');
     if (!textarea) return;
-    
+
     textarea.style.height = 'auto';
     textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px';
 }
 
 function updateSendButton() {
     const input = document.getElementById('messageInput');
-    const button = document.getElementById('sendButton');
+    // boton en templates: .send-btn
+    const button = document.querySelector('.send-btn') || document.getElementById('sendButton');
     
     if (!input || !button) return;
     
@@ -210,14 +270,35 @@ async function sendMessage() {
             const data = await response.json();
             hideTypingIndicator();
             
-            if (data.success) {
-                addBotMessage(data.message, data.sources);
+            // Verificar si hay una respuesta exitosa
+            if (data.response) {
+                addBotMessage(data.response, data.sources || []);
+            } else if (data.error) {
+                addErrorMessage(data.error);
             } else {
-                addErrorMessage(data.error || 'Error desconocido');
+                addErrorMessage('Error desconocido');
             }
         } else {
             hideTypingIndicator();
-            addErrorMessage(`Error del servidor: ${response.status}`);
+            
+            // Manejar diferentes tipos de error
+            if (response.status === 401) {
+                // Sesión expirada - redirigir al login
+                showToast('Tu sesión ha expirado. Redirigiendo al login...', 'warning');
+                setTimeout(() => {
+                    window.location.href = '/login';
+                }, 2000);
+                addErrorMessage('⏰ Sesión expirada. Redirigiendo al login...');
+            } else if (response.status === 429) {
+                // Rate limit excedido
+                addErrorMessage('⚠️ Demasiadas consultas. Por favor, espera un momento antes de continuar.');
+            } else if (response.status >= 500) {
+                // Error del servidor
+                addErrorMessage(`🔧 Error interno del servidor (${response.status}). Intenta de nuevo en unos momentos.`);
+            } else {
+                // Otros errores
+                addErrorMessage(`Error del servidor: ${response.status}`);
+            }
         }
         
     } catch (error) {
@@ -233,18 +314,11 @@ async function sendMessage() {
 // ===== MANEJO DE MENSAJES EN UI =====
 function addUserMessage(text) {
     const messageId = `msg-${Date.now()}-user`;
-    const time = formatTime(new Date());
     
     const messageHtml = `
-        <div class="message user-message" id="${messageId}">
+        <div class="message message-user" id="${messageId}">
             <div class="message-content">
-                <div class="message-bubble">
-                    <div class="message-text">${escapeHtml(text)}</div>
-                    <div class="message-time">${time}</div>
-                </div>
-            </div>
-            <div class="message-avatar">
-                <i class="fas fa-user"></i>
+                <div class="message-text">${escapeHtml(text)}</div>
             </div>
         </div>
     `;
@@ -262,7 +336,6 @@ function addUserMessage(text) {
 
 function addBotMessage(text, sources = []) {
     const messageId = `msg-${Date.now()}-bot`;
-    const time = formatTime(new Date());
     
     // Procesar texto para formato markdown básico
     const formattedText = formatBotResponse(text);
@@ -271,24 +344,30 @@ function addBotMessage(text, sources = []) {
     let citationsHtml = '';
     if (sources && sources.length > 0) {
         citationsHtml = `
-            <div class="message-citations">
-                <strong>📚 Fuentes:</strong>
-                ${sources.map(source => `<span class="citation">${escapeHtml(source)}</span>`).join(' ')}
+            <div class="message-sources">
+                <div class="sources-header">
+                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z" fill="currentColor"/>
+                    </svg>
+                    Fuentes consultadas
+                </div>
+                <div class="sources-list">
+                    ${sources.map(source => `<span class="source-item">${escapeHtml(source)}</span>`).join('')}
+                </div>
             </div>
         `;
     }
     
     const messageHtml = `
-        <div class="message bot-message" id="${messageId}">
-            <div class="message-avatar">
-                <i class="fas fa-robot"></i>
+        <div class="message message-bot" id="${messageId}">
+            <div class="assistant-avatar-small">
+                <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 2C13.1 2 14 2.9 14 4C14 5.1 13.1 6 12 6C10.9 6 10 5.1 10 4C10 2.9 10.9 2 12 2ZM21 9V7L15 1H5C3.89 1 3 1.89 3 3V19A2 2 0 0 0 5 21H19A2 2 0 0 0 21 19V9M19 9H14V4L19 9Z" fill="currentColor"/>
+                </svg>
             </div>
             <div class="message-content">
-                <div class="message-bubble">
-                    <div class="message-text">${formattedText}</div>
-                    ${citationsHtml}
-                    <div class="message-time">${time}</div>
-                </div>
+                <div class="message-text">${formattedText}</div>
+                ${citationsHtml}
             </div>
         </div>
     `;
@@ -307,19 +386,20 @@ function addBotMessage(text, sources = []) {
 
 function addErrorMessage(errorText) {
     const messageId = `msg-${Date.now()}-error`;
-    const time = formatTime(new Date());
     
     const messageHtml = `
-        <div class="message bot-message" id="${messageId}">
-            <div class="message-avatar" style="background: var(--jp-error);">
-                <i class="fas fa-exclamation-triangle"></i>
+        <div class="message message-bot" id="${messageId}">
+            <div class="assistant-avatar-small" style="background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);">
+                <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 9V13M12 17H12.01M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C16.9706 3 21 7.02944 21 12Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
             </div>
             <div class="message-content">
-                <div class="message-bubble" style="border-left: 4px solid var(--jp-error);">
-                    <div class="message-text">
-                        <strong>❌ Error:</strong> ${escapeHtml(errorText)}
+                <div class="message-text">
+                    <div class="error-message">
+                        <strong>Ha ocurrido un error</strong>
+                        <p>${escapeHtml(errorText)}</p>
                     </div>
-                    <div class="message-time">${time}</div>
                 </div>
             </div>
         </div>
@@ -346,25 +426,34 @@ function appendMessage(messageHtml) {
 
 // ===== INDICADOR DE TIPEO =====
 function showTypingIndicator() {
-    const typingId = 'typing-indicator';
-    
-    // Remover indicador existente
+    // Usar el indicador del área de input si existe
+    const inlineTyping = document.getElementById('typingIndicator');
+    if (inlineTyping) {
+        inlineTyping.classList.add('active');
+        inlineTyping.style.display = 'flex';
+        return;
+    }
+
+    // Fallback: crear indicador en el chat
+    const typingId = 'typing-indicator-chat';
     const existing = document.getElementById(typingId);
     if (existing) existing.remove();
-    
+
     const typingHtml = `
-        <div class="message bot-message" id="${typingId}">
-            <div class="message-avatar">
-                <i class="fas fa-robot"></i>
+        <div class="message message-bot" id="${typingId}">
+            <div class="assistant-avatar-small">
+                <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 2C13.1 2 14 2.9 14 4C14 5.1 13.1 6 12 6C10.9 6 10 5.1 10 4C10 2.9 10.9 2 12 2ZM21 9V7L15 1H5C3.89 1 3 1.89 3 3V19A2 2 0 0 0 5 21H19A2 2 0 0 0 21 19V9M19 9H14V4L19 9Z" fill="currentColor"/>
+                </svg>
             </div>
             <div class="message-content">
-                <div class="typing-indicator">
-                    <span>JP_IA está escribiendo</span>
+                <div class="typing-animation">
                     <div class="typing-dots">
-                        <span></span>
-                        <span></span>
-                        <span></span>
+                        <div class="typing-dot"></div>
+                        <div class="typing-dot"></div>
+                        <div class="typing-dot"></div>
                     </div>
+                    <span class="typing-text">JP_IA está escribiendo...</span>
                 </div>
             </div>
         </div>
@@ -375,10 +464,34 @@ function showTypingIndicator() {
 }
 
 function hideTypingIndicator() {
-    const indicator = document.getElementById('typing-indicator');
-    if (indicator) {
-        indicator.remove();
+    // Ocultar indicador del área de input
+    const inlineTyping = document.getElementById('typingIndicator');
+    if (inlineTyping) {
+        inlineTyping.classList.remove('active');
+        inlineTyping.style.display = 'none';
     }
+    
+    // Remover indicador del chat si existe
+    const chatTyping = document.getElementById('typing-indicator-chat');
+    if (chatTyping) {
+        chatTyping.remove();
+    }
+    
+    AppState.isTyping = false;
+    updateSendButton();
+}
+
+function appendMessage(messageHtml) {
+    const chatContainer = document.getElementById('chatContainer');
+    if (!chatContainer) return;
+    
+    // Remover mensaje de bienvenida si existe
+    const welcomeMessage = document.getElementById('welcomeMessage');
+    if (welcomeMessage) {
+        welcomeMessage.style.display = 'none';
+    }
+    
+    chatContainer.insertAdjacentHTML('beforeend', messageHtml);
 }
 
 // ===== NAVEGACIÓN DE ESPECIALISTAS =====
@@ -565,12 +678,40 @@ function escapeHtml(text) {
 }
 
 function formatBotResponse(text) {
-    // Formato básico para respuestas del bot
-    return escapeHtml(text)
-        .replace(/\n/g, '<br>')
-        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-        .replace(/\*(.*?)\*/g, '<em>$1</em>')
-        .replace(/\[TOMO ([^\]]+)\]/g, '<span class="citation">TOMO $1</span>');
+    // Formato mejorado para respuestas conversacionales
+    let formatted = escapeHtml(text);
+    
+    // 1. Convertir saltos de línea a párrafos para mejor legibilidad
+    formatted = formatted.replace(/\n\n+/g, '</p><p>').replace(/\n/g, '<br>');
+    formatted = '<p>' + formatted + '</p>';
+    
+    // 2. Formatear encabezados y secciones
+    formatted = formatted.replace(/###\s*(.*?)(<br>|<\/p>)/g, '<h4 class="response-heading">$1</h4>');
+    formatted = formatted.replace(/##\s*(.*?)(<br>|<\/p>)/g, '<h3 class="response-heading">$1</h3>');
+    formatted = formatted.replace(/#\s*(.*?)(<br>|<\/p>)/g, '<h2 class="response-heading">$1</h2>');
+    
+    // 3. Formatear elementos importantes
+    formatted = formatted.replace(/\*\*(.*?)\*\*/g, '<strong class="highlight">$1</strong>');
+    formatted = formatted.replace(/\*(.*?)\*/g, '<em class="emphasis">$1</em>');
+    
+    // 4. Formatear referencias a TOmos con estilo especial
+    formatted = formatted.replace(/TOMO\s+(\d+)/gi, '<span class="tomo-reference">TOMO $1</span>');
+    formatted = formatted.replace(/\[TOMO ([^\]]+)\]/g, '<span class="citation">📋 TOMO $1</span>');
+    
+    // 5. Formatear listas y viñetas
+    formatted = formatted.replace(/^-\s+(.*?)(<br>|$)/gm, '<li class="list-item">$1</li>');
+    formatted = formatted.replace(/(<li class="list-item">.*?<\/li>)/gs, '<ul class="response-list">$1</ul>');
+    
+    // 6. Formatear definiciones y conceptos clave
+    formatted = formatted.replace(/([A-ZÁÉÍÓÚÑ][A-Za-záéíóúñ\s]{10,}?):/g, '<strong class="definition-term">$1:</strong>');
+    
+    // 7. Formatear artículos y referencias legales
+    formatted = formatted.replace(/(Artículo|Art\.|Ley|Reglamento)\s+([^\s,.<]+)/g, '<span class="legal-reference">$1 $2</span>');
+    
+    // 8. Limpiar párrafos vacíos
+    formatted = formatted.replace(/<p><\/p>/g, '').replace(/<p><br><\/p>/g, '');
+    
+    return formatted;
 }
 
 // ===== ATAJOS DE TECLADO =====

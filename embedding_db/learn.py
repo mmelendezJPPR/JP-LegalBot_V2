@@ -1,10 +1,10 @@
 import json, uuid
 from typing import Dict
 from openai import OpenAI
-from config import OPENAI_API_KEY, MODEL_CHAT, DB_PATH, FAISS_PATH
-from db import get_conn, insert_knowledge_fact
-from prompts import POST_EXTRACT_FACTS
-from retrieve import HybridRetriever
+from .config import OPENAI_API_KEY, MODEL_CHAT, DB_PATH, FAISS_PATH
+from .db import get_conn, insert_knowledge_fact
+from .prompts import POST_EXTRACT_FACTS
+from .retrieve import HybridRetriever
 import faiss, numpy as np, os
 
 client = OpenAI(api_key=OPENAI_API_KEY)

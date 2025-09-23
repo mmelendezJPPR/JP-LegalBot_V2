@@ -1,13 +1,20 @@
 from typing import Dict, List
-from openai import OpenAI
-from config import OPENAI_API_KEY, MODEL_CHAT
+from openai import AzureOpenAI
+from config import (
+    AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_KEY, AZURE_OPENAI_API_VERSION, 
+    AZURE_OPENAI_DEPLOYMENT_NAME
+)
 from prompts import SYSTEM_RAG, USER_TEMPLATE
 from retrieve import HybridRetriever
 
 class AnswerEngine:
     def __init__(self, retriever: HybridRetriever):
         self.retriever = retriever
-        self.client = OpenAI(api_key=OPENAI_API_KEY)
+        self.client = AzureOpenAI(
+            api_key=AZURE_OPENAI_KEY,
+            api_version=AZURE_OPENAI_API_VERSION,
+            azure_endpoint=AZURE_OPENAI_ENDPOINT
+        )
 
     def format_context(self, items: List[Dict]) -> str:
         lines = []
@@ -26,7 +33,7 @@ class AnswerEngine:
         user_msg = USER_TEMPLATE.format(query=query, context=context_text)
 
         resp = self.client.chat.completions.create(
-            model=MODEL_CHAT,
+            model=AZURE_OPENAI_DEPLOYMENT_NAME,
             messages=[
                 {"role": "system", "content": SYSTEM_RAG},
                 {"role": "user", "content": user_msg}

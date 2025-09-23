@@ -2,8 +2,8 @@ import os, glob, uuid, json, argparse, numpy as np
 from tqdm import tqdm
 from openai import OpenAI
 import faiss
-from config import OPENAI_API_KEY, MODEL_EMBED, DB_PATH, FAISS_PATH
-from db import get_conn, upsert_chunk
+from .config import OPENAI_API_KEY, MODEL_EMBED, DB_PATH, FAISS_PATH
+from .db import get_conn, upsert_chunk
 from chunker import split_into_blocks, guess_metadata_from_text
 
 os.makedirs(os.path.dirname(FAISS_PATH), exist_ok=True)

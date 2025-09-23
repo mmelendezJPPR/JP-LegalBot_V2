@@ -155,13 +155,13 @@
         </div>
         {% endif %}
         
-        <form method="POST" action="{{ url_for('login_page') }}">
+        <form method="POST" action="/login">
             <div class="form-group">
                 <label for="username">Usuario:</label>
                 <input type="text" 
                        id="username" 
                        name="username" 
-                       value="{{ request.form.username }}"
+                       value="{{ request.form.username if request.form else '' }}"
                        required 
                        autocomplete="username"
                        placeholder="Ingrese su usuario">
@@ -193,13 +193,8 @@
     
     <script>
         // Auto-focus en el campo de usuario al cargar
-        document.getElementById('username').focus();
-        
-        // Efecto de enter para enviar el formulario
-        document.addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                document.querySelector('form').submit();
-            }
+        document.addEventListener('DOMContentLoaded', function() {
+            document.getElementById('username').focus();
         });
     </script>
 </body>

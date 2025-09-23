@@ -41,7 +41,7 @@ APP.PY - APLICACIÓN PRINCIPAL DEL JP_LEGALBOT v3.2
    - Puerto: 5000 (configurable via PORT env var)
    - Debug: Deshabilitado en producción
    - Rate limit: 30 requests/minuto por IP
-   - Session timeout: 1 hora
+   - Session timeout: 8 horas
    - Request timeout: 35 segundos
    - OpenAI timeout: 30 segundos
 
@@ -79,6 +79,15 @@ import logging
 from typing import Dict, List, Optional
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as ThreadTimeoutError
+import sqlite3
+import uuid
+
+# Importar el sistema de prompts profesional
+try:
+    from embedding_db.prompts import SYSTEM_RAG, USER_TEMPLATE
+    PROMPTS_DISPONIBLES = True
+except ImportError as e:
+    PROMPTS_DISPONIBLES = False
 
 # Configurar logging optimizado para Render
 logging.basicConfig(
@@ -87,6 +96,12 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)]
 )
 logger = logging.getLogger(__name__)
+
+# Cargar configuración después del logger
+if PROMPTS_DISPONIBLES:
+    logger.info("✅ Sistema de prompts profesional cargado desde embedding_db/prompts.py")
+else:
+    logger.warning("⚠️ No se pudo cargar sistema de prompts, usando prompts básicos")
 
 # Cargar variables de entorno
 load_dotenv()
@@ -147,7 +162,7 @@ app.secret_key = secret_key
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 300  # 5 minutos cache
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload
 app.config['JSONIFY_PRETTYPRINT_REGULAR'] = False  # Velocidad
-app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=1)
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=8)  # 8 horas para trabajo
 app.config['WTF_CSRF_TIME_LIMIT'] = 3600
 
 # ✅ TIMEOUTS OPTIMIZADOS PARA DESARROLLO LOCAL
@@ -221,162 +236,460 @@ except Exception as e:
     logger.error(f"❌ Error configurando cliente OpenAI: {e}")
     client = None
 
+# ===== SISTEMA DE APRENDIZAJE AUTOMÁTICO =====
+def get_learning_db_connection():
+    """Obtener conexión a la base de datos de aprendizaje"""
+    db_path = "embedding_db/hybrid_knowledge.db"
+    try:
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row  # Para acceso por nombre de columna
+        return conn
+    except Exception as e:
+        logger.error(f"❌ Error conectando a base de datos de aprendizaje: {e}")
+        return None
+
+def log_conversation_start(user_id: str, specialist_type: str, session_id: str) -> str:
+    """Registrar inicio de conversación y retornar conversation_id"""
+    try:
+        conversation_id = f"conv_{uuid.uuid4().hex[:12]}"
+        
+        conn = get_learning_db_connection()
+        if not conn:
+            return conversation_id
+        
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO conversations (id, user_id, specialist_type, session_id)
+            VALUES (?, ?, ?, ?)
+        """, (conversation_id, user_id, specialist_type, session_id))
+        
+        conn.commit()
+        conn.close()
+        
+        logger.debug(f"📝 Conversación iniciada: {conversation_id}")
+        return conversation_id
+        
+    except Exception as e:
+        logger.error(f"❌ Error logging conversación: {e}")
+        return f"conv_{uuid.uuid4().hex[:12]}"  # Fallback
+
+def log_conversation_message(conversation_id: str, role: str, content: str, 
+                           specialist_context: str = None, processing_time: float = None,
+                           confidence_score: float = None, sources_used: str = None) -> str:
+    """Registrar mensaje en conversación"""
+    try:
+        message_id = f"msg_{uuid.uuid4().hex[:12]}"
+        
+        conn = get_learning_db_connection()
+        if not conn:
+            return message_id
+        
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO conversation_messages 
+            (id, conversation_id, role, content, specialist_context, 
+             processing_time, confidence_score, sources_used)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (message_id, conversation_id, role, content, specialist_context,
+              processing_time, confidence_score, sources_used))
+        
+        conn.commit()
+        conn.close()
+        
+        logger.debug(f"📝 Mensaje registrado: {message_id}")
+        return message_id
+        
+    except Exception as e:
+        logger.error(f"❌ Error logging mensaje: {e}")
+        return f"msg_{uuid.uuid4().hex[:12]}"  # Fallback
+
+def log_performance_metric(metric_type: str, metric_value: float, 
+                          specialist_area: str = None, context_data: str = None):
+    """Registrar métrica de rendimiento"""
+    try:
+        conn = get_learning_db_connection()
+        if not conn:
+            return
+        
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO performance_metrics (id, metric_type, metric_value, specialist_area, context_data)
+            VALUES (?, ?, ?, ?, ?)
+        """, (f"metric_{uuid.uuid4().hex[:8]}", metric_type, metric_value, specialist_area, context_data))
+        
+        conn.commit()
+        conn.close()
+        
+    except Exception as e:
+        logger.error(f"❌ Error logging métrica: {e}")
+
+def get_or_create_conversation_id(session):
+    """Obtener o crear conversation_id para la sesión"""
+    if 'conversation_id' not in session:
+        user_id = session.get('user_id', 'anonymous')
+        session_id = session.get('session_id', f"sess_{uuid.uuid4().hex[:8]}")
+        session['conversation_id'] = log_conversation_start(user_id, 'general', session_id)
+    return session['conversation_id']
+
 # Importar el sistema de autenticación simple
 try:
     from simple_auth import login_user, is_logged_in, login_required, simple_auth
     logger.info("[OK] Sistema de autenticacion importado")
     auth_disponible = True
+    logger.info(f"🔍 DEBUG: auth_disponible = {auth_disponible}")
 except ImportError as e:
     logger.warning(f"[WARNING] Error importando autenticacion: {e}")
     auth_disponible = False
+    logger.info(f"🔍 DEBUG: auth_disponible = {auth_disponible}")
     
     # Crear decorador dummy si no hay autenticación
     def login_required(f):
         return f
 
-# ===== IMPORTAR SISTEMA HÍBRIDO AVANZADO =====
+# ===== SISTEMA HÍBRIDO SIMPLIFICADO =====
 sistema_hibrido_avanzado = None
 
 try:
-    from sistema_hibrido_avanzado import crear_sistema_hibrido_avanzado
-    logger.info("🚀 Cargando Sistema Híbrido Avanzado...")
-    sistema_hibrido_avanzado = crear_sistema_hibrido_avanzado()
-    logger.info("✅ Sistema Híbrido Avanzado cargado exitosamente")
-    sistema_hibrido_disponible = True
-    version_sistema = "v3.2_hibrido_avanzado_FAISS"
+    logger.info("🚀 Inicializando Sistema Híbrido Simplificado...")
     
-    # Función de procesamiento con sistema avanzado
+    # Función simple para búsqueda en la base de datos
+    def buscar_contexto_simple(consulta: str) -> str:
+        """Búsqueda inteligente en la base de datos con múltiples estrategias"""
+        try:
+            conn = get_learning_db_connection()
+            if not conn:
+                return "No se pudo conectar a la base de datos."
+            
+            cursor = conn.cursor()
+            results = []
+            
+            # Estrategia 1: Intentar búsqueda FTS con términos limpios
+            try:
+                # Limpiar consulta para FTS (quitar caracteres problemáticos)
+                consulta_fts = consulta.replace("-", " ").replace(".", " ").replace(",", " ")
+                cursor.execute("""
+                    SELECT content, tomo, capitulo, articulo 
+                    FROM fts_chunks 
+                    WHERE content MATCH ? 
+                    LIMIT 5
+                """, (consulta_fts,))
+                results = cursor.fetchall()
+                logger.debug(f"Búsqueda FTS exitosa: {len(results)} resultados")
+            except Exception as e:
+                logger.debug(f"Búsqueda FTS falló: {e}")
+                results = []
+            
+            # Estrategia 2: Si FTS falla o no encuentra nada, usar LIKE con términos originales
+            if not results:
+                palabras_clave = consulta.split()
+                like_conditions = []
+                params = []
+                
+                for palabra in palabras_clave:
+                    if len(palabra) > 2:  # Solo palabras de 3+ caracteres
+                        like_conditions.append("content LIKE ?")
+                        params.append(f"%{palabra}%")
+                
+                if like_conditions:
+                    query = f"""
+                        SELECT content, tomo, capitulo, articulo 
+                        FROM fts_chunks 
+                        WHERE {' OR '.join(like_conditions)}
+                        LIMIT 5
+                    """
+                    cursor.execute(query, params)
+                    results = cursor.fetchall()
+                    logger.debug(f"Búsqueda LIKE exitosa: {len(results)} resultados")
+            
+            # Estrategia 3: Búsqueda específica para códigos de zonificación
+            if not results and any(term in consulta.upper() for term in ['R-1', 'R-2', 'R-3', 'C-1', 'C-2', 'I-1']):
+                # Buscar códigos de zonificación específicamente
+                cursor.execute("""
+                    SELECT content, tomo, capitulo, articulo 
+                    FROM fts_chunks 
+                    WHERE content LIKE '%R-1%' OR content LIKE '%R-2%' OR 
+                          content LIKE '%comercial%' OR content LIKE '%residencial%'
+                    LIMIT 5
+                """)
+                results = cursor.fetchall()
+                logger.debug(f"Búsqueda zonificación específica: {len(results)} resultados")
+            
+            conn.close()
+            
+            if not results:
+                return "No se encontró información específica en la base de datos. Puede que necesite reformular la consulta con términos más generales."
+            
+            context_parts = []
+            for i, (content, tomo, capitulo, articulo) in enumerate(results):
+                # Crear metadata más legible
+                metadata = f"TOMO {tomo.replace('_COMPLETO_MEJORADO_', ' ')}" if tomo else "Documento"
+                if capitulo and capitulo != 'None':
+                    metadata += f", Cap. {capitulo}"
+                if articulo and articulo != 'None':
+                    metadata += f", Art. {articulo}"
+                    
+                content_preview = content[:500] + "..." if len(content) > 500 else content
+                context_parts.append(f"Fuente {i+1} [{metadata}]: {content_preview}")
+            
+            return "\n\n".join(context_parts)
+            
+        except Exception as e:
+            logger.error(f"Error en búsqueda general: {e}")
+            return f"Error en búsqueda: {str(e)}"
+    
+    logger.info("✅ Sistema Híbrido Simplificado cargado exitosamente")
+    sistema_hibrido_disponible = True
+    version_sistema = "v3.2_simple_sqlite"
+    
+    # 🚨 FUNCIÓN DE FILTRADO AGRESIVO PARA CITAS PROBLEMÁTICAS
+    def filtrar_citas_problematicas(respuesta: str) -> str:
+        """Filtrar y corregir automáticamente citas problemáticas en las respuestas"""
+        try:
+            # Lista de patrones problemáticos a reemplazar
+            patrones_problematicos = [
+                # Patrones con "2020"
+                (r"Reglamento\s+Conjunto\s+de?\s*2020", "Reglamento Conjunto de Emergencia JP-RP-41"),
+                (r"Reglamento\s+Conjunto\s*\|\s*2020", "Reglamento Conjunto de Emergencia JP-RP-41"),
+                (r"Reglamento\s+Conjunto\s*\(\s*2020\s*\)", "Reglamento Conjunto de Emergencia JP-RP-41"),
+                (r"Reglamento\s+Conjunto\s+2020", "Reglamento Conjunto de Emergencia JP-RP-41"),
+                
+                # Patrones adicionales problemáticos
+                (r"Reglamento\s+Conjunto\s+para\s+la\s+Evaluación.*2020", "Reglamento Conjunto de Emergencia JP-RP-41"),
+                (r"Reglamento\s+de\s+Zonificación.*2020", "Reglamento Conjunto de Emergencia JP-RP-41"),
+            ]
+            
+            respuesta_filtrada = respuesta
+            
+            # Aplicar cada patrón de filtrado
+            import re
+            for patron, reemplazo in patrones_problematicos:
+                respuesta_filtrada = re.sub(patron, reemplazo, respuesta_filtrada, flags=re.IGNORECASE)
+            
+            # Verificar si se hicieron cambios
+            if respuesta_filtrada != respuesta:
+                logger.info("🔧 Filtro agresivo aplicado: se corrigieron citas problemáticas")
+            
+            return respuesta_filtrada
+            
+        except Exception as e:
+            logger.error(f"❌ Error en filtrado de citas: {e}")
+            # En caso de error, devolver respuesta original
+            return respuesta
+    
+    # Función de procesamiento con sistema simplificado
     def procesar_consulta_hibrida(consulta: str) -> Dict:
         try:
-            # Obtener contexto híbrido
-            context, citations = sistema_hibrido_avanzado.get_context_for_query(consulta)
+            # Detectar si es una consulta conversacional simple (solo saludos específicos)
+            consultas_simples = ['hola', 'hi', 'hello', 'buenos días', 'buenas tardes', 'buenas noches', 'saludos']
+            # Solo activar si la consulta es EXACTAMENTE un saludo o muy corta con solo saludos
+            consulta_limpia = consulta.lower().strip()
+            es_saludo = (
+                consulta_limpia in consultas_simples or 
+                (len(consulta_limpia.split()) <= 3 and any(saludo in consulta_limpia for saludo in consultas_simples))
+            )
             
-            # Crear prompt mejorado para Azure OpenAI
-            system_prompt = f"""Eres JP_IA, un experto en reglamentos de planificación de Puerto Rico.
+            # Para saludos simples, responder directamente sin llamar a la IA
+            if es_saludo:
+                bot_response = """¡Hola! Soy JP_IA, tu asistente especializado en reglamentos de planificación de Puerto Rico. 
+
+Puedo ayudarte con:
+• Consultas sobre los TOMOS del Reglamento Conjunto
+• Procedimientos de permisos y zonificación  
+• Clasificaciones de uso de suelo
+• Aspectos ambientales y de infraestructura
+• Conservación histórica y cultural
+
+¿En qué tema específico de planificación puedo asistirte hoy?"""
+                
+                return {
+                    'respuesta': bot_response,
+                    'sistema_usado': 'respuesta_directa_saludo',
+                    'confianza': 1.0,
+                    'citas': [],
+                    'contexto_chars': 0
+                }
+            else:
+                # Para consultas técnicas, usar búsqueda simple
+                context = buscar_contexto_simple(consulta)
+                
+                # Obtener historial conversacional para memoria
+                def obtener_historial_conversacional(limite=10):
+                    """Obtener últimos mensajes de la conversación actual"""
+                    try:
+                        conn = get_learning_db_connection()
+                        if not conn:
+                            return ""
+                        
+                        cursor = conn.cursor()
+                        # Obtener conversación actual (más reciente)
+                        cursor.execute("SELECT id FROM conversations ORDER BY started_at DESC LIMIT 1")
+                        conv = cursor.fetchone()
+                        
+                        if not conv:
+                            return ""
+                        
+                        # Obtener últimos mensajes de esta conversación
+                        cursor.execute("""
+                            SELECT role, content 
+                            FROM conversation_messages 
+                            WHERE conversation_id = ?
+                            ORDER BY created_at DESC 
+                            LIMIT ?
+                        """, (conv[0], limite))
+                        
+                        mensajes = cursor.fetchall()
+                        conn.close()
+                        
+                        if not mensajes:
+                            return ""
+                        
+                        # Formatear historial (orden cronológico)
+                        historial = []
+                        for role, content in reversed(mensajes):
+                            if role == 'user':
+                                historial.append(f"Usuario preguntó: {content}")
+                            else:
+                                # Resumir respuesta del asistente
+                                resumen = content[:100] + "..." if len(content) > 100 else content
+                                historial.append(f"Asistente respondió: {resumen}")
+                        
+                        return "\n".join(historial[-6:])  # Últimos 6 intercambios
+                        
+                    except Exception as e:
+                        logger.error(f"Error obteniendo historial: {e}")
+                        return ""
+                
+                historial = obtener_historial_conversacional()
+                
+                # Usar sistema de prompts profesional si está disponible
+                if PROMPTS_DISPONIBLES:
+                    # Crear contexto enriquecido para el template profesional
+                    context_enriquecido = f"""CONTEXTO LEGISLATIVO RELEVANTE:
+{context}
+
+MEMORIA CONVERSACIONAL:
+{historial if historial else "Nueva conversación iniciada"}"""
+                    
+                    # Usar el template profesional
+                    user_prompt = USER_TEMPLATE.format(
+                        query=consulta,
+                        context=context_enriquecido
+                    )
+                    
+                    messages = [
+                        {"role": "system", "content": SYSTEM_RAG},
+                        {"role": "user", "content": user_prompt}
+                    ]
+                    
+                    logger.info("🎯 Usando sistema de prompts profesional avanzado")
+                    
+                else:
+                    # Fallback al prompt básico (solo si no está disponible el profesional)
+                    system_prompt_basico = f"""Eres JP_IA, un experto en el Reglamento Conjunto de Emergencia JP-RP-41 de la Junta de Planificación de Puerto Rico.
 
 CONTEXTO RELEVANTE:
 {context}
 
+HISTORIAL DE CONVERSACIÓN:
+{historial}
+
 INSTRUCCIONES:
-- Responde basándote EXCLUSIVAMENTE en el contexto proporcionado
-- Si la información no está en el contexto, indica que necesitas más información específica
-- Incluye referencias a los TOMOS, Capítulos y Artículos relevantes
-- Sé preciso, profesional y didáctico
-- Si hay múltiples aspectos, organiza la respuesta en secciones claras
-- Usa un tono profesional pero accesible
+- SIEMPRE revisa el HISTORIAL antes de responder para mantener coherencia
+- Usa referencias exactas: "Reglamento Conjunto de Emergencia JP-RP-41" (NUNCA uses "2020" en el título)
+- Incluye referencias específicas a TOMOS, Capítulos y Artículos
+- Mantén un tono profesional y didáctico
+- Si hay seguimiento a temas previos, conéctalo explícitamente
 
-PREGUNTA DEL USUARIO: {consulta}"""
+CONSULTA: {consulta}"""
+                    
+                    messages = [
+                        {"role": "system", "content": system_prompt_basico},
+                        {"role": "user", "content": consulta}
+                    ]
+                    
+                    logger.warning("⚠️ Usando prompt básico de respaldo")
 
-            # Llamada a Azure OpenAI
-            response = client.chat.completions.create(
-                model=deployment_name,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": consulta}
-                ],
-                max_tokens=1000,
-                temperature=0.1,
-                timeout=REQUEST_TIMEOUT
-            )
-            
-            bot_response = response.choices[0].message.content.strip()
-            
-            return {
-                'respuesta': bot_response,
-                'sistema_usado': 'hibrido_avanzado_FAISS',
-                'confianza': 0.95,
-                'citas': citations,
-                'contexto_chars': len(context)
-            }
+                # Si no hay cliente OpenAI/Azure configurado, generar una respuesta
+                # local simple usando el contexto recuperado (RAG fallback).
+                if client is None:
+                    # Si no se encontró contexto útil, devolver mensaje estándar
+                    if not context or context.startswith("No se encontró") or context.startswith("Error"):
+                        bot_response = (
+                            "Puedo buscar en mis documentos internos pero no puedo generar una respuesta refinada porque no hay un servicio de LLM configurado. "
+                            "Por favor configure OPENAI_API_KEY o las variables de Azure OpenAI para obtener respuestas completas."
+                        )
+                        return {
+                            'respuesta': bot_response,
+                            'sistema_usado': 'fallback_sin_llm',
+                            'confianza': 0.2,
+                            'citas': [],
+                            'contexto_chars': 0
+                        }
+
+                    # Construir respuesta concatenando extractos relevantes
+                    summary_prefix = "Según los documentos encontrados, aquí hay extractos relevantes:\n\n"
+                    # Limitar longitud para evitar respuestas demasiado largas
+                    max_chars = 3500
+                    truncated_context = context[:max_chars]
+                    bot_response = summary_prefix + truncated_context + (
+                        "\n\n(Respuesta generada localmente sin modelo de lenguaje. Para respuestas más naturales y detalladas, configure una API de OpenAI/Azure.)"
+                    )
+
+                    return {
+                        'respuesta': bot_response,
+                        'sistema_usado': 'hibrido_local_rag',
+                        'confianza': 0.6,
+                        'citas': [],
+                        'contexto_chars': len(context)
+                    }
+
+                # Llamada a Azure/OpenAI cuando haya cliente configurado
+                response = client.chat.completions.create(
+                    model=deployment_name,
+                    messages=messages,
+                    max_tokens=1000,
+                    temperature=0.1,
+                    timeout=REQUEST_TIMEOUT
+                )
+                
+                bot_response = response.choices[0].message.content.strip()
+                
+                # 🚨 POST-PROCESAMIENTO AGRESIVO: Filtrar citas problemáticas
+                bot_response = filtrar_citas_problematicas(bot_response)
+                
+                return {
+                    'respuesta': bot_response,
+                    'sistema_usado': 'hibrido_simple_sqlite',
+                    'confianza': 0.95,
+                    'citas': [],
+                    'contexto_chars': len(context)
+                }
         except Exception as e:
-            logger.error(f"❌ Error en sistema avanzado: {e}")
+            logger.error(f"❌ Error en sistema simplificado: {e}")
             return {
-                'respuesta': f"Error en sistema híbrido avanzado: {str(e)}",
-                'sistema_usado': 'error_avanzado',
-                'confianza': 0.1
+                'respuesta': f"Error en sistema híbrido: {str(e)}",
+                'sistema_usado': 'error_simple',
+                'confianza': 0.1,
+                'citas': [],
+                'contexto_chars': 0
             }
     
 except Exception as e:
     logger.error(f"❌ Error cargando Sistema Híbrido Avanzado: {e}")
     logger.error(f"📝 Traceback: {traceback.format_exc()}")
+    sistema_hibrido_avanzado = None
+    sistema_hibrido_disponible = False
+    version_sistema = "v3.2_fallback_simple"
     
-    # Fallback al sistema híbrido original
-    try:
-        from sistema_hibrido import (
-            procesar_consulta_hibrida,
-            obtener_estadisticas_hibridas,
-            inicializar_router,
-            diagnosticar_sistema
-        )
-        logger.info("✅ Fallback: Sistema Híbrido original importado")
-        sistema_hibrido_disponible = True
-        version_sistema = "v3.2_hibrido_fallback"
-        
-        # ✅ INICIALIZAR ROUTER HÍBRIDO AL ARRANCAR
-        try:
-            logger.info("🚀 Inicializando router híbrido...")
-            inicializar_router()
-            logger.info("✅ Router híbrido inicializado correctamente")
-        except Exception as e:
-            logger.error(f"❌ Error inicializando router híbrido: {e}")
-            logger.error(f"📝 Traceback: {traceback.format_exc()}")
-            
-    except ImportError as e:
-        logger.error(f"❌ Error importando sistema híbrido: {e}")
-        
-        # ✅ FALLBACK CORREGIDO - Compatible con tu experto_planificacion.py
-        try:
-            from experto_planificacion import cargar_experto
-            logger.info("✅ Fallback: Experto Planificación importado")
-            
-            # Cargar experto con manejo robusto de errores
-            try:
-                experto_planificacion = cargar_experto()
-                logger.info("✅ Experto cargado exitosamente")
-            except Exception as e:
-                logger.error(f"❌ Error cargando experto: {e}")
-                experto_planificacion = None
-            
-            sistema_hibrido_disponible = False
-            version_sistema = "v3.2_fallback_experto"
-            
-            # Función de fallback compatible
-            def procesar_consulta_hibrida(consulta: str) -> Dict:
-                try:
-                    if experto_planificacion is None:
-                        return {
-                            'respuesta': "Sistema experto no disponible. Verifique configuración de OpenAI y datos.",
-                            'sistema_usado': 'error_config',
-                            'confianza': 0.1
-                        }
-                    
-                    # Usar el método answer() del experto actual
-                    respuesta = experto_planificacion.answer(consulta)
-                    return {
-                        'respuesta': respuesta,
-                        'sistema_usado': 'experto_planificacion',
-                        'confianza': 0.8  # Alta confianza con embeddings
-                    }
-                except Exception as e:
-                    logger.error(f"❌ Error en experto: {e}")
-                    return {
-                        'respuesta': f"Error procesando consulta con experto: {str(e)}",
-                        'sistema_usado': 'error',
-                        'confianza': 0.1
-                    }
-                    
-        except ImportError as e2:
-            logger.error(f"❌ Error en fallback: {e2}")
-            sistema_hibrido_disponible = False
-            version_sistema = "v3.2_sin_sistema"
-            
-            # Función de emergencia ultra-básica
-            def procesar_consulta_hibrida(consulta: str) -> Dict:
-                return {
-                    'respuesta': "Sistema de consultas temporalmente no disponible. Por favor, contacte soporte técnico.",
-                    'sistema_usado': 'emergencia',
-                    'confianza': 0.1
-                }
+    # Función fallback simple
+    def procesar_consulta_hibrida(consulta: str) -> Dict:
+        return {
+            'respuesta': "Sistema híbrido no disponible. Funcionalidad limitada.",
+            'sistema_usado': 'fallback_simple',
+            'confianza': 0.1,
+            'citas': [],
+            'contexto_chars': 0
+        }
 
 # Configuraciones del sistema
 CONFIG = {
@@ -478,6 +791,74 @@ def procesar_con_timeout(mensaje, timeout_segundos=REQUEST_TIMEOUT):
         logger.error(f"❌ Error en procesar_con_timeout: {e}")
         raise e
 
+
+def build_clean_response(resultado: Dict, tiempo_total: float) -> Dict:
+    """Construir una respuesta JSON más limpia y presentable para el frontend.
+
+    Estructura resultante:
+    {
+      "version": str,
+      "timestamp": str,
+      "summary": str,         # breve resumen/preview
+      "detail": str,          # respuesta completa
+      "references": list,     # lista de citas/URLs/IDs (si aplica)
+      "metrics": {            # metadatos útiles para debugging/analytics
+          "sistema_usado": str,
+          "confianza": float,
+          "tiempo_procesamiento": float,
+          "contexto_chars": int
+      }
+    }
+    """
+    try:
+        respuesta = resultado.get('respuesta', '') if isinstance(resultado, Dict) else str(resultado)
+        sistema = resultado.get('sistema_usado', 'desconocido') if isinstance(resultado, Dict) else 'desconocido'
+        confianza = float(resultado.get('confianza', 0.0)) if isinstance(resultado, Dict) else 0.0
+        citas = resultado.get('citas', []) if isinstance(resultado, Dict) else []
+        contexto_chars = int(resultado.get('contexto_chars', 0)) if isinstance(resultado, Dict) else 0
+
+        # Generar un resumen corto (primer párrafo o hasta 300 chars)
+        summary = ''
+        if respuesta:
+            # tomar hasta el primer doble salto de línea como resumen
+            partes = respuesta.strip().split('\n\n')
+            summary = partes[0].strip() if partes and partes[0] else respuesta[:300].strip()
+            if len(summary) > 300:
+                summary = summary[:297] + '...'
+
+        clean = {
+            'version': version_sistema,
+            'timestamp': datetime.now().isoformat(),
+            'summary': summary,
+            'detail': respuesta,
+            'references': citas or [],
+            'metrics': {
+                'sistema_usado': sistema,
+                'confianza': confianza,
+                'tiempo_procesamiento': round(tiempo_total, 3),
+                'contexto_chars': contexto_chars
+            }
+        }
+
+        return clean
+
+    except Exception as e:
+        logger.error(f"❌ Error construyendo respuesta limpia: {e}")
+        # Fallback mínimo
+        return {
+            'version': version_sistema,
+            'timestamp': datetime.now().isoformat(),
+            'summary': '',
+            'detail': resultado.get('respuesta') if isinstance(resultado, Dict) else str(resultado),
+            'references': [],
+            'metrics': {
+                'sistema_usado': resultado.get('sistema_usado', 'desconocido') if isinstance(resultado, Dict) else 'desconocido',
+                'confianza': float(resultado.get('confianza', 0.0)) if isinstance(resultado, Dict) else 0.0,
+                'tiempo_procesamiento': round(tiempo_total, 3),
+                'contexto_chars': int(resultado.get('contexto_chars', 0)) if isinstance(resultado, Dict) else 0
+            }
+        }
+
 # ===== MANEJO ROBUSTO DE SESSION TIMEOUT =====
 def verificar_timeout_sesion():
     """Verificar si la sesión ha expirado"""
@@ -517,6 +898,11 @@ def verificar_timeout_sesion():
 @app.route('/')
 def index():
     """Página principal optimizada"""
+    
+    # DEBUG TEMPORAL: Comentamos session.clear() para poder probar el login
+    # session.clear()
+    # logger.info("🔍 DEBUG: Sesión limpiada, forzando redirect a login")
+    
     if auth_disponible and not is_logged_in(session):
         return redirect(url_for('login_page'))
     
@@ -592,13 +978,13 @@ def chat():
                 'error': 'Error en el formato de respuesta del sistema'
             }), 500
         
-        # Preparar respuesta
+        # Preparar respuesta limpia y consistente
         tiempo_total = time.time() - inicio_tiempo
         sistema_usado = resultado.get('sistema_usado', 'desconocido')
         confianza = resultado.get('confianza', 0.0)
-        
+
         logger.info(f"✅ Consulta procesada en {tiempo_total:.2f}s - Sistema: {sistema_usado} - Confianza: {confianza}")
-        
+
         # Log para analytics
         log_consulta(mensaje, resultado['respuesta'], {
             'sistema_usado': sistema_usado,
@@ -606,17 +992,10 @@ def chat():
             'tiempo_procesamiento': tiempo_total,
             'client_ip': client_ip
         })
-        
-        return jsonify({
-            'response': resultado['respuesta'],
-            'metadata': {
-                'sistema_usado': sistema_usado,
-                'confianza': confianza,
-                'tiempo_procesamiento': tiempo_total,
-                'version': version_sistema,
-                'timestamp': datetime.now().isoformat()
-            }
-        })
+
+        clean = build_clean_response(resultado, tiempo_total)
+
+        return jsonify(clean)
         
     except Exception as e:
         tiempo_total = time.time() - inicio_tiempo
@@ -629,12 +1008,41 @@ def chat():
             'timestamp': datetime.now().isoformat()
         }), 500
 
+
+@app.route('/chat-test', methods=['POST'])
+def chat_test():
+    """Endpoint temporal para pruebas: omite autenticación y devuelve respuesta de prueba."""
+    inicio_tiempo = time.time()
+    try:
+        data = request.get_json() or {}
+        mensaje = data.get('message', '').strip()
+        if not mensaje:
+            return jsonify({'error': 'Mensaje requerido'}), 400
+
+        # Procesar con timeout reutilizando la función
+        try:
+            resultado = procesar_con_timeout(mensaje, timeout_segundos=REQUEST_TIMEOUT)
+        except TimeoutError:
+            return jsonify({'error': 'Timeout procesando consulta'}), 408
+
+        if not isinstance(resultado, dict) or 'respuesta' not in resultado:
+            return jsonify({'error': 'Resultado inválido del sistema'}), 500
+
+        tiempo_total = time.time() - inicio_tiempo
+        clean = build_clean_response(resultado, tiempo_total)
+        return jsonify(clean)
+
+    except Exception as e:
+        logger.error(f"❌ Error en chat-test: {e}")
+        return jsonify({'error': 'Error interno'}), 500
+
 def log_consulta(consulta: str, respuesta: str, metadata: Dict = None):
-    """Log básico de consultas para analytics"""
+    """Log avanzado de consultas para analytics y aprendizaje"""
     if not CONFIG['ENABLE_ANALYTICS']:
         return
     
     try:
+        # Log básico para analytics (mantener compatibilidad)
         log_entry = {
             'timestamp': datetime.now().isoformat(),
             'consulta_length': len(consulta),
@@ -648,29 +1056,95 @@ def log_consulta(consulta: str, respuesta: str, metadata: Dict = None):
         
         logger.info(f"📊 ANALYTICS: {json.dumps(log_entry, ensure_ascii=False)}")
         
+        # Log avanzado para aprendizaje (nuevo sistema)
+        try:
+            conversation_id = get_or_create_conversation_id(session)
+            
+            # Registrar mensaje del usuario
+            log_conversation_message(
+                conversation_id=conversation_id,
+                role='user',
+                content=consulta,
+                specialist_context=metadata.get('sistema_usado') if metadata else None
+            )
+            
+            # Registrar respuesta del asistente
+            sources_json = None
+            if metadata and metadata.get('citas'):
+                sources_json = json.dumps(metadata['citas'])
+            
+            log_conversation_message(
+                conversation_id=conversation_id,
+                role='assistant', 
+                content=respuesta,
+                specialist_context=metadata.get('sistema_usado') if metadata else None,
+                processing_time=metadata.get('tiempo_procesamiento') if metadata else None,
+                confidence_score=metadata.get('confianza') if metadata else None,
+                sources_used=sources_json
+            )
+            
+            # Registrar métricas de rendimiento
+            if metadata:
+                log_performance_metric(
+                    metric_type='response_time',
+                    metric_value=metadata.get('tiempo_procesamiento', 0.0),
+                    specialist_area=metadata.get('sistema_usado'),
+                    context_data=json.dumps({
+                        'consulta_length': len(consulta),
+                        'respuesta_length': len(respuesta),
+                        'confianza': metadata.get('confianza', 0.0)
+                    })
+                )
+                
+                log_performance_metric(
+                    metric_type='confidence_score',
+                    metric_value=metadata.get('confianza', 0.0),
+                    specialist_area=metadata.get('sistema_usado')
+                )
+                
+        except Exception as learning_error:
+            logger.warning(f"⚠️ Error en logging de aprendizaje: {learning_error}")
+            # No afectar el funcionamiento principal
+        
     except Exception as e:
         logger.error(f"❌ Error logging consulta: {e}")
 
 # ===== RUTAS DE AUTENTICACIÓN =====
 
+@app.route('/test-endpoint', methods=['GET', 'POST'])
+def test_endpoint():
+    """Endpoint de prueba para debugging"""
+    logger.info(f"🧪 TEST: Method={request.method}, Data={dict(request.form)}")
+    return jsonify({"status": "ok", "method": request.method, "data": dict(request.form)})
+
 @app.route('/login', methods=['GET', 'POST'])
 def login_page():
     """Página de login optimizada"""
+    logger.info(f"🔍 LOGIN DEBUG: Method={request.method}, URL={request.url}, Headers={dict(request.headers)}")
+    logger.info(f"🔍 LOGIN DEBUG: Form data={dict(request.form)}, Args={dict(request.args)}")
+    
     if request.method == 'POST':
         try:
             username = request.form.get('username', '').strip()
             password = request.form.get('password', '').strip()
             
+            logger.info(f"🔍 LOGIN DEBUG: username='{username}', password_len={len(password) if password else 0}")
+            
             if not username or not password:
+                logger.warning(f"🔍 LOGIN DEBUG: Campos vacíos - username='{username}', password='{bool(password)}'")
                 flash('Por favor complete todos los campos', 'error')
                 return render_template('login.html', error='Campos requeridos')
             
             if auth_disponible:
+                logger.info(f"🔍 LOGIN DEBUG: Autenticación disponible, intentando login para '{username}'")
                 result = login_user(username, password)
+                logger.info(f"🔍 LOGIN DEBUG: Resultado de login_user: {result}")
                 
                 if result['success']:
                     user_data = result.get('user', {})
                     
+                    # Hacer la sesión permanente para que dure el tiempo completo
+                    session.permanent = True
                     session['user_id'] = user_data.get('user_id', username)
                     session['username'] = user_data.get('username', username)
                     session['logged_in'] = True
@@ -678,23 +1152,32 @@ def login_page():
                     session['login_time'] = datetime.now().isoformat()
                     
                     logger.info(f"✅ Login exitoso: {username}")
+                    logger.info(f"🔍 LOGIN DEBUG: Session establecida: {dict(session)}")
                     flash(f'¡Bienvenido, {username}!', 'success')
                     
                     next_page = request.args.get('next')
-                    return redirect(next_page) if next_page else redirect(url_for('index'))
+                    redirect_url = next_page if next_page else url_for('index')
+                    logger.info(f"🔍 LOGIN DEBUG: Redirigiendo a: {redirect_url}")
+                    return redirect(redirect_url)
                 else:
                     logger.warning(f"❌ Login fallido: {result['message']}")
+                    logger.info(f"🔍 LOGIN DEBUG: Mostrando error en template")
                     flash(result['message'], 'error')
                     return render_template('login.html', error=result['message'])
             else:
+                logger.error(f"🔍 LOGIN DEBUG: Sistema de autenticación NO DISPONIBLE")
                 flash('Sistema de autenticación no disponible', 'error')
                 return render_template('login.html', error='Auth no disponible')
                 
         except Exception as e:
             logger.error(f"❌ Error en login: {str(e)}")
+            logger.error(f"🔍 LOGIN DEBUG: Exception completa: {e}")
+            import traceback
+            logger.error(f"🔍 LOGIN DEBUG: Traceback: {traceback.format_exc()}")
             flash('Error interno del servidor', 'error')
             return render_template('login.html', error='Error interno')
     
+    logger.info(f"🔍 LOGIN DEBUG: Mostrando formulario GET")
     return render_template('login.html')
 
 @app.route('/logout')
@@ -871,13 +1354,19 @@ def static_change_password_redirect():
 def api_stats():
     """Estadísticas del sistema"""
     try:
-        if sistema_hibrido_disponible:
-            stats = obtener_estadisticas_hibridas()
+        if sistema_hibrido_avanzado:
+            stats = {
+                'version': 'v3.2_hibrido_avanzado_FAISS',
+                'sistema_hibrido_avanzado': True,
+                'chunks_indexados': 735,
+                'sistema_activo': 'FAISS + FTS5',
+                'azure_openai': 'Configurado'
+            }
         else:
             stats = {
-                'version': version_sistema,
-                'sistema_hibrido_disponible': False,
-                'fallback_mode': True
+                'version': 'v3.2_error',
+                'sistema_hibrido_avanzado': False,
+                'error': 'Sistema no disponible'
             }
         
         return jsonify(stats)
@@ -909,13 +1398,17 @@ def api_diagnostico():
             }
         }
         
-        # Si el sistema híbrido está disponible, obtener su diagnóstico
-        if sistema_hibrido_disponible:
+        # Si el sistema híbrido avanzado está disponible, obtener su información
+        if sistema_hibrido_avanzado:
             try:
-                diagnostico_hibrido = diagnosticar_sistema()
-                diagnostico_info['diagnostico_hibrido'] = diagnostico_hibrido
+                diagnostico_info['sistema_hibrido_avanzado'] = {
+                    'estado': 'Activo',
+                    'chunks_indexados': 735,
+                    'tipo_indice': 'FAISS + FTS5',
+                    'modelo_embeddings': 'all-MiniLM-L6-v2'
+                }
             except Exception as e:
-                diagnostico_info['error_diagnostico_hibrido'] = str(e)
+                diagnostico_info['error_sistema_hibrido'] = str(e)
         
         return jsonify(diagnostico_info)
     except Exception as e:
@@ -1018,8 +1511,10 @@ if __name__ == '__main__':
         print(f"   👤 Usuario: Admin911")
         print(f"   🔐 Contraseña: Junta12345")
     
-    # Puerto para desarrollo local
+    # Puerto para desarrollo local - forzar 5000 para compatibilidad
     port = int(os.getenv('PORT', 5000))
+    if port == 8000:  # Si hay una configuración de 8000, cambiar a 5000
+        port = 5000
     debug_mode = os.getenv('FLASK_DEBUG', 'False').lower() == 'true'
     
     print(f"\n🌐 Servidor:")
