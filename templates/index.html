@@ -3,183 +3,903 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>JP_IA - Junta de Planificación de Puerto Rico</title>
-    <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}" type="image/x-icon">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <title>JP_IA - Sistema Experto de Planificación</title>
+    <style>
+        /* ===== VARIABLES Y RESET ===== */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            /* Colores principales */
+            --color-principal: #FFFFFF;
+            --color-secundario: #000000;
+            --color-azul-marino: #1e3a8a;
+            --color-azul-claro: #3b82f6;
+            --color-gris-claro: #f8fafc;
+            --color-gris-medio: #94a3b8;
+            --color-gris-oscuro: #334155;
+            
+            /* Sombras */
+            --sombra-suave: 0 2px 8px rgba(0, 0, 0, 0.1);
+            --sombra-media: 0 4px 16px rgba(0, 0, 0, 0.15);
+            --sombra-fuerte: 0 8px 32px rgba(0, 0, 0, 0.2);
+            
+            /* Tipografía */
+            --fuente-principal: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            
+            /* Espaciado */
+            --espaciado-xs: 0.25rem;
+            --espaciado-sm: 0.5rem;
+            --espaciado-md: 1rem;
+            --espaciado-lg: 1.5rem;
+            --espaciado-xl: 2rem;
+            
+            /* Bordes */
+            --radio-sm: 0.5rem;
+            --radio-md: 0.75rem;
+            --radio-lg: 1rem;
+            --radio-full: 9999px;
+        }
+
+        body {
+            font-family: var(--fuente-principal);
+            background: var(--color-gris-claro);
+            color: var(--color-secundario);
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
+
+        /* ===== CONTENEDOR PRINCIPAL ===== */
+        .app-container {
+            display: flex;
+            height: 100vh;
+            background: var(--color-principal);
+        }
+
+        /* ===== SIDEBAR ===== */
+        .sidebar {
+            width: 320px;
+            background: var(--color-principal);
+            color: var(--color-secundario);
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            box-shadow: var(--sombra-fuerte);
+            border-right: 1px solid #e2e8f0;
+        }
+
+        .sidebar-header {
+            padding: var(--espaciado-xl);
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .logo-container {
+            display: flex;
+            align-items: center;
+            gap: var(--espaciado-md);
+            margin-bottom: var(--espaciado-lg);
+        }
+
+        .logo {
+            width: 60px;
+            height: 60px;
+            background: var(--color-azul-marino);
+            border-radius: var(--radio-md);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 800;
+            font-size: 1.5rem;
+            color: var(--color-principal);
+        }
+
+        .logo-text h1 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin-bottom: var(--espaciado-xs);
+            color: var(--color-azul-marino);
+        }
+
+        .logo-text p {
+            font-size: 0.875rem;
+            color: var(--color-gris-medio);
+        }
+
+        /* ===== NAVEGACIÓN DE ESPECIALISTAS ===== */
+        .specialists-nav {
+            flex: 1;
+            padding: var(--espaciado-lg);
+            overflow-y: auto;
+        }
+
+        .specialists-nav h3 {
+            font-size: 0.875rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: var(--espaciado-md);
+            color: var(--color-gris-medio);
+        }
+
+        .specialist-btn {
+            width: 100%;
+            padding: var(--espaciado-md);
+            background: var(--color-gris-claro);
+            border: 1px solid #e2e8f0;
+            border-radius: var(--radio-md);
+            color: var(--color-secundario);
+            cursor: pointer;
+            margin-bottom: var(--espaciado-sm);
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: var(--espaciado-md);
+            text-align: left;
+        }
+
+        .specialist-btn:hover {
+            background: #e2e8f0;
+            border-color: var(--color-azul-marino);
+            transform: translateX(4px);
+        }
+
+        .specialist-btn.active {
+            background: var(--color-azul-marino);
+            color: var(--color-principal);
+            font-weight: 600;
+            border-color: var(--color-azul-marino);
+        }
+
+        .specialist-icon {
+            width: 40px;
+            height: 40px;
+            background: var(--color-principal);
+            border-radius: var(--radio-sm);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.25rem;
+            flex-shrink: 0;
+        }
+
+        .specialist-btn.active .specialist-icon {
+            background: rgba(255, 255, 255, 0.2);
+            color: var(--color-principal);
+        }
+
+        .specialist-info {
+            flex: 1;
+        }
+
+        .specialist-name {
+            font-weight: 600;
+            margin-bottom: 2px;
+        }
+
+        .specialist-desc {
+            font-size: 0.75rem;
+            opacity: 0.7;
+        }
+
+        .specialist-btn.active .specialist-desc {
+            opacity: 0.9;
+        }
+
+        /* ===== BOTÓN NEW CHAT ===== */
+        .new-chat-btn {
+            margin: var(--espaciado-lg);
+            padding: var(--espaciado-md);
+            background: var(--color-azul-marino);
+            color: var(--color-principal);
+            border: none;
+            border-radius: var(--radio-md);
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: var(--espaciado-sm);
+            transition: all 0.3s ease;
+        }
+
+        .new-chat-btn:hover {
+            background: var(--color-azul-claro);
+            transform: translateY(-2px);
+            box-shadow: var(--sombra-media);
+        }
+
+        /* ===== ÁREA DE CHAT ===== */
+        .chat-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: var(--color-gris-claro);
+        }
+
+        .chat-header {
+            background: var(--color-principal);
+            padding: var(--espaciado-xl);
+            border-bottom: 1px solid #e2e8f0;
+            box-shadow: var(--sombra-suave);
+        }
+
+        .chat-header h2 {
+            font-size: 1.5rem;
+            color: var(--color-azul-marino);
+            margin-bottom: var(--espaciado-xs);
+        }
+
+        .chat-header p {
+            color: var(--color-gris-medio);
+            font-size: 0.875rem;
+        }
+
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: var(--espaciado-sm);
+            padding: var(--espaciado-xs) var(--espaciado-md);
+            background: #dbeafe;
+            color: var(--color-azul-marino);
+            border-radius: var(--radio-full);
+            font-size: 0.75rem;
+            font-weight: 600;
+            margin-top: var(--espaciado-sm);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            background: var(--color-azul-claro);
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        /* ===== MENSAJES ===== */
+        .messages-container {
+            flex: 1;
+            padding: var(--espaciado-xl);
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: var(--espaciado-lg);
+        }
+
+        .message {
+            display: flex;
+            gap: var(--espaciado-md);
+            animation: slideIn 0.3s ease;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .message.user {
+            flex-direction: row-reverse;
+        }
+
+        .message-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            flex-shrink: 0;
+        }
+
+        .message.bot .message-avatar {
+            background: var(--color-azul-marino);
+            color: var(--color-principal);
+        }
+
+        .message.user .message-avatar {
+            background: var(--color-secundario);
+            color: var(--color-principal);
+        }
+
+        .message-content {
+            flex: 1;
+            max-width: 70%;
+            background: var(--color-principal);
+            padding: var(--espaciado-lg);
+            border-radius: var(--radio-lg);
+            box-shadow: var(--sombra-suave);
+        }
+
+        .message.user .message-content {
+            background: var(--color-azul-marino);
+            color: var(--color-principal);
+        }
+
+        .message-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: var(--espaciado-sm);
+            font-size: 0.75rem;
+            opacity: 0.7;
+        }
+
+        .message-text {
+            line-height: 1.6;
+        }
+
+        /* ===== MENSAJE DE BIENVENIDA ===== */
+        .welcome-message {
+            text-align: center;
+            padding: var(--espaciado-xl);
+            max-width: 600px;
+            margin: auto;
+        }
+
+        .welcome-message h3 {
+            color: var(--color-azul-marino);
+            font-size: 1.5rem;
+            margin-bottom: var(--espaciado-md);
+        }
+
+        .welcome-message p {
+            color: var(--color-gris-medio);
+            margin-bottom: var(--espaciado-lg);
+        }
+
+        .quick-actions {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: var(--espaciado-md);
+            margin-top: var(--espaciado-xl);
+        }
+
+        .quick-action {
+            padding: var(--espaciado-md);
+            background: var(--color-principal);
+            border: 2px solid #e2e8f0;
+            border-radius: var(--radio-md);
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .quick-action:hover {
+            border-color: var(--color-azul-marino);
+            transform: translateY(-2px);
+            box-shadow: var(--sombra-media);
+        }
+
+        .quick-action-icon {
+            font-size: 1.5rem;
+            margin-bottom: var(--espaciado-sm);
+        }
+
+        .quick-action-text {
+            font-size: 0.875rem;
+            font-weight: 600;
+            color: var(--color-azul-marino);
+        }
+
+        /* ===== INDICADOR DE ESCRITURA ===== */
+        .typing-indicator {
+            display: none;
+            align-items: center;
+            gap: var(--espaciado-sm);
+            padding: var(--espaciado-md);
+        }
+
+        .typing-indicator.active {
+            display: flex;
+        }
+
+        .typing-dots {
+            display: flex;
+            gap: 4px;
+        }
+
+        .typing-dot {
+            width: 8px;
+            height: 8px;
+            background: var(--color-azul-marino);
+            border-radius: 50%;
+            animation: bounce 1.4s infinite ease-in-out;
+        }
+
+        .typing-dot:nth-child(1) { animation-delay: -0.32s; }
+        .typing-dot:nth-child(2) { animation-delay: -0.16s; }
+
+        @keyframes bounce {
+            0%, 80%, 100% {
+                transform: scale(0);
+                opacity: 0.5;
+            }
+            40% {
+                transform: scale(1);
+                opacity: 1;
+            }
+        }
+
+        /* ===== ÁREA DE INPUT ===== */
+        .input-area {
+            background: var(--color-principal);
+            padding: var(--espaciado-xl);
+            border-top: 1px solid #e2e8f0;
+        }
+
+        .input-wrapper {
+            display: flex;
+            gap: var(--espaciado-md);
+            align-items: flex-end;
+        }
+
+        .input-container {
+            flex: 1;
+            position: relative;
+        }
+
+        #messageInput {
+            width: 100%;
+            padding: var(--espaciado-md) var(--espaciado-lg);
+            border: 2px solid #e2e8f0;
+            border-radius: var(--radio-lg);
+            font-family: var(--fuente-principal);
+            font-size: 1rem;
+            resize: none;
+            transition: all 0.3s ease;
+            background: var(--color-gris-claro);
+        }
+
+        #messageInput:focus {
+            outline: none;
+            border-color: var(--color-azul-marino);
+            background: var(--color-principal);
+        }
+
+        .send-btn {
+            width: 56px;
+            height: 56px;
+            background: var(--color-azul-marino);
+            color: var(--color-principal);
+            border: none;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.25rem;
+            transition: all 0.3s ease;
+            flex-shrink: 0;
+        }
+
+        .send-btn:hover {
+            transform: scale(1.1);
+            box-shadow: var(--sombra-media);
+        }
+
+        .send-btn:active {
+            transform: scale(0.95);
+        }
+
+        /* ===== SCROLLBAR PERSONALIZADO ===== */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--color-gris-medio);
+            border-radius: var(--radio-full);
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--color-gris-oscuro);
+        }
+
+        /* ===== RESPONSIVE ===== */
+        @media (max-width: 768px) {
+            .sidebar {
+                position: fixed;
+                left: -320px;
+                top: 0;
+                height: 100vh;
+                z-index: 1000;
+                transition: left 0.3s ease;
+                background: var(--color-principal);
+            }
+
+            .sidebar.active {
+                left: 0;
+                box-shadow: var(--sombra-fuerte);
+            }
+
+            .message-content {
+                max-width: 85%;
+            }
+
+            .quick-actions {
+                grid-template-columns: 1fr;
+            }
+
+            .mobile-menu-btn {
+                display: flex;
+            }
+        }
+
+        /* ===== BOTÓN MENÚ MÓVIL ===== */
+        .mobile-menu-btn {
+            display: none;
+            position: fixed;
+            top: var(--espaciado-md);
+            left: var(--espaciado-md);
+            width: 48px;
+            height: 48px;
+            background: var(--color-azul-marino);
+            color: var(--color-principal);
+            border: none;
+            border-radius: var(--radio-md);
+            cursor: pointer;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.25rem;
+            z-index: 999;
+            box-shadow: var(--sombra-media);
+        }
+
+        .mobile-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 999;
+        }
+
+        .mobile-overlay.active {
+            display: block;
+        }
+    </style>
 </head>
 <body>
-    <div class="main-container">
+    <!-- Botón menú móvil -->
+    <button class="mobile-menu-btn" onclick="toggleMobileMenu()">☰</button>
+    
+    <!-- Overlay móvil -->
+    <div class="mobile-overlay" id="mobileOverlay" onclick="toggleMobileMenu()"></div>
+
+    <div class="app-container">
         <!-- Sidebar -->
-        <div class="sidebar">
-            <div class="logo-section">
-                <img src="{{ url_for('static', filename='JP_V2.png') }}" alt="Junta de Planificación de Puerto Rico" id="main-logo" onerror="this.style.backgroundImage='url(/static/JPlogo.png)';">
-                <h1>JP_IA EXPERTO</h1>
-                <p>IA Analítica Especializada</p>
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo-container">
+                    <img src="/static/JP_V2.png" alt="Logo JP_IA" class="logo">
+                    <div class="logo-text">
+                        <h1>JP_IA</h1>
+                        <p>Sistema Experto</p>
+                    </div>
+                </div>
             </div>
 
-            <!-- Selección de Especialistas -->
-            <div class="specialists-section">
-                <h3><i class="fas fa-users"></i> Especialistas</h3>
+            <nav class="specialists-nav">
+                <h3>Especialistas</h3>
                 
-                <!-- Chat General -->
-                <button class="specialist-button active" onclick="seleccionarEspecialista('general')" data-specialist="general">
-                    <div class="specialist-icon">
-                        <i class="fas fa-brain"></i>
-                    </div>
+                <button class="specialist-btn active" data-specialist="general">
+                    <div class="specialist-icon">🧠</div>
                     <div class="specialist-info">
-                        <span class="specialist-name">Chat General</span>
-                        <span class="specialist-desc">Análisis completo de todos los reglamentos</span>
+                        <div class="specialist-name">Chat General</div>
+                        <div class="specialist-desc">Análisis completo</div>
                     </div>
                 </button>
-                
-                <!-- Procedimientos -->
-                <button class="specialist-button" onclick="seleccionarEspecialista('procedimientos')" data-specialist="procedimientos">
-                    <div class="specialist-icon">
-                        <i class="fas fa-clipboard-list"></i>
-                    </div>
-                    <div class="specialist-info">
-                        <span class="specialist-name">Procedimientos</span>
-                        <span class="specialist-desc">Procesos administrativos y trámites</span>
-                    </div>
-                </button>
-                
-                <!-- Técnico Gráfico -->
-                <button class="specialist-button" onclick="seleccionarEspecialista('tecnico-grafico')" data-specialist="tecnico-grafico">
-                    <div class="specialist-icon">
-                        <i class="fas fa-drafting-compass"></i>
-                    </div>
-                    <div class="specialist-info">
-                        <span class="specialist-name">Técnico Gráfico</span>
-                        <span class="specialist-desc">Planos, mapas y documentos técnicos</span>
-                    </div>
-                </button>
-                
-                <!-- Edificabilidad -->
-                <button class="specialist-button" onclick="seleccionarEspecialista('edificabilidad')" data-specialist="edificabilidad">
-                    <div class="specialist-icon">
-                        <i class="fas fa-building"></i>
-                    </div>
-                    <div class="specialist-info">
-                        <span class="specialist-name">Edificabilidad</span>
-                        <span class="specialist-desc">Construcción y densidad urbana</span>
-                    </div>
-                </button>
-                
-                <!-- Zonificación -->
-                <button class="specialist-button" onclick="seleccionarEspecialista('zonificacion')" data-specialist="zonificacion">
-                    <div class="specialist-icon">
-                        <i class="fas fa-map-marked-alt"></i>
-                    </div>
-                    <div class="specialist-info">
-                        <span class="specialist-name">Zonificación</span>
-                        <span class="specialist-desc">Clasificación y uso del suelo</span>
-                    </div>
-                </button>
-                
-                <!-- Ambiental -->
-                <button class="specialist-button" onclick="seleccionarEspecialista('ambiental-infraestructura')" data-specialist="ambiental-infraestructura">
-                    <div class="specialist-icon">
-                        <i class="fas fa-leaf"></i>
-                    </div>
-                    <div class="specialist-info">
-                        <span class="specialist-name">Ambiental</span>
-                        <span class="specialist-desc">Impacto ambiental e infraestructura</span>
-                    </div>
-                </button>
-                
-                <!-- Histórico -->
-                <button class="specialist-button" onclick="seleccionarEspecialista('historico')" data-specialist="historico">
-                    <div class="specialist-icon">
-                        <i class="fas fa-landmark"></i>
-                    </div>
-                    <div class="specialist-info">
-                        <span class="specialist-name">Histórico</span>
-                        <span class="specialist-desc">Conservación histórica y cultural</span>
-                    </div>
-                </button>
-                
-                <!-- Botón New Chat -->
-                <div class="separator"></div>
-                <button class="action-button new-chat-button" onclick="iniciarNuevoChat()">
-                    <i class="fas fa-plus"></i> New Chat
-                </button>
-            </div>
-        </div>
 
-        <!-- Chat Section -->
-        <div class="chat-section">
-            <div class="chat-header">
-                <div class="chat-header-content">
-                    <h2 id="specialist-title">
-                        <i class="fas fa-brain"></i> 
-                        <span id="specialist-name">Experto JP_IA</span>
-                    </h2>
-                    <p id="specialist-description">Análisis Inteligente de Reglamentos de Planificación</p>
-                    <div class="status-indicator">
-                        <div class="status-dot"></div>
-                        <span id="specialist-status">Sistema Experto Activo</span>
+                <button class="specialist-btn" data-specialist="procedimientos">
+                    <div class="specialist-icon">📋</div>
+                    <div class="specialist-info">
+                        <div class="specialist-name">Procedimientos</div>
+                        <div class="specialist-desc">Trámites y permisos</div>
                     </div>
+                </button>
+
+                <button class="specialist-btn" data-specialist="tecnico">
+                    <div class="specialist-icon">📐</div>
+                    <div class="specialist-info">
+                        <div class="specialist-name">Técnico Gráfico</div>
+                        <div class="specialist-desc">Planos y mapas</div>
+                    </div>
+                </button>
+
+                <button class="specialist-btn" data-specialist="edificabilidad">
+                    <div class="specialist-icon">🏗️</div>
+                    <div class="specialist-info">
+                        <div class="specialist-name">Edificabilidad</div>
+                        <div class="specialist-desc">Construcción y densidad</div>
+                    </div>
+                </button>
+
+                <button class="specialist-btn" data-specialist="zonificacion">
+                    <div class="specialist-icon">🗺️</div>
+                    <div class="specialist-info">
+                        <div class="specialist-name">Zonificación</div>
+                        <div class="specialist-desc">Uso del suelo</div>
+                    </div>
+                </button>
+
+                <button class="specialist-btn" data-specialist="ambiental">
+                    <div class="specialist-icon">🌿</div>
+                    <div class="specialist-info">
+                        <div class="specialist-name">Ambiental</div>
+                        <div class="specialist-desc">Impacto e infraestructura</div>
+                    </div>
+                </button>
+
+                <button class="specialist-btn" data-specialist="historico">
+                    <div class="specialist-icon">🏛️</div>
+                    <div class="specialist-info">
+                        <div class="specialist-name">Histórico</div>
+                        <div class="specialist-desc">Conservación cultural</div>
+                    </div>
+                </button>
+            </nav>
+
+            <button class="new-chat-btn" onclick="newChat()">
+                <span>➕</span>
+                <span>Nueva Conversación</span>
+            </button>
+        </aside>
+
+        <!-- Área de Chat -->
+        <main class="chat-area">
+            <header class="chat-header">
+                <h2>Experto JP_IA</h2>
+                <p>Análisis Inteligente de Reglamentos de Planificación</p>
+                <div class="status-badge">
+                    <div class="status-dot"></div>
+                    Sistema Activo
                 </div>
-            </div>
-            
-            <div id="chat-container" class="chat-container">
-                <div class="message bot-message">
-                    <div class="message-header">
-                        <div class="message-avatar">
-                            <i class="fas fa-user-graduate"></i>
+            </header>
+
+            <div class="messages-container" id="messagesContainer">
+                <div class="welcome-message">
+                    <h3>¡Bienvenido al Sistema JP_IA! 👋</h3>
+                    <p>Soy tu experto en planificación de Puerto Rico. Tengo acceso completo a todos los reglamentos y puedo analizar cualquier consulta para darte respuestas precisas y detalladas.</p>
+                    
+                    <div class="quick-actions">
+                        <div class="quick-action" onclick="quickQuery('¿Qué permisos necesito para construir una casa?')">
+                            <div class="quick-action-icon">🏠</div>
+                            <div class="quick-action-text">Permisos de construcción</div>
                         </div>
-                        <span>Experto JP</span>
-                    </div>
-                    <div class="message-content">
-                        ¡Hola! Soy tu experto en planificación de Puerto Rico. 🎓 Tengo acceso completo a todos los reglamentos y puedo analizar cualquier consulta para darte respuestas precisas y detalladas.
-                        
-                        <div class="ejemplos">
-                            <h4><i class="fas fa-lightbulb"></i> Pregúntame cualquier cosa sobre planificación:</h4>
-                            • <strong>"¿Qué permisos necesito para construir una casa?"</strong> - Análisis específico de requisitos<br>
-                            • <strong>"Explícame el proceso de zonificación"</strong> - Procedimientos detallados paso a paso<br>
-                            • <strong>"¿Cuáles son las regulaciones para sitios históricos?"</strong> - Análisis de conservación<br>
-                            • <strong>"¿Qué agencias están involucradas en X proceso?"</strong> - Mapeo de entidades gubernamentales
+                        <div class="quick-action" onclick="quickQuery('¿Cuál es el proceso de zonificación?')">
+                            <div class="quick-action-icon">🗂️</div>
+                            <div class="quick-action-text">Proceso de zonificación</div>
                         </div>
-                        
-                        Puedo analizar cualquier aspecto de los reglamentos de planificación y darte respuestas expertas basadas en datos reales. ¡Pregúntame lo que necesites!
+                        <div class="quick-action" onclick="quickQuery('Regulaciones para sitios históricos')">
+                            <div class="quick-action-icon">🏛️</div>
+                            <div class="quick-action-text">Sitios históricos</div>
+                        </div>
                     </div>
                 </div>
             </div>
-            
-            <!-- Typing Indicator -->
-            <div id="typing-indicator" class="message bot-message typing-indicator" style="display: none;">
-                <div class="message-header">
-                    <div class="message-avatar">
-                        <i class="fas fa-user-graduate"></i>
+
+            <div class="input-area">
+                <div class="typing-indicator" id="typingIndicator">
+                    <div class="typing-dots">
+                        <div class="typing-dot"></div>
+                        <div class="typing-dot"></div>
+                        <div class="typing-dot"></div>
                     </div>
-                    <span>Experto JP</span>
+                    <span>Experto está escribiendo...</span>
                 </div>
-                <div class="message-content typing-content">
-                    <div class="typing-animation">
-                        <span></span>
-                        <span></span>
-                        <span></span>
+
+                <div class="input-wrapper">
+                    <div class="input-container">
+                        <textarea 
+                            id="messageInput" 
+                            placeholder="Escribe tu consulta sobre planificación..."
+                            rows="3"
+                            onkeydown="handleKeyPress(event)"
+                        ></textarea>
                     </div>
-                    <div class="typing-text">está escribiendo...</div>
-                </div>
-            </div>
-            
-            <div class="input-section">
-                <div class="input-container">
-                    <div class="input-wrapper">
-                        <input type="text" id="message-input" placeholder="Escribe tu consulta sobre planificación..."
-                               onkeypress="if(event.key==='Enter' && !event.shiftKey) { event.preventDefault(); enviarMensaje(); }">
-                    </div>
-                    <button class="send-button" onclick="enviarMensaje()" title="Enviar mensaje">
-                        <i class="fas fa-paper-plane"></i>
-                    </button>
+                    <button class="send-btn" onclick="sendMessage()">➤</button>
                 </div>
             </div>
-        </div>
+        </main>
     </div>
 
-    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    <script>
+        // Variables globales
+        let currentSpecialist = 'general';
+        let conversationHistory = [];
+
+        // Inicialización
+        document.addEventListener('DOMContentLoaded', () => {
+            setupSpecialistButtons();
+            autoResizeTextarea();
+        });
+
+        // Configurar botones de especialistas
+        function setupSpecialistButtons() {
+            const buttons = document.querySelectorAll('.specialist-btn');
+            buttons.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    buttons.forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    currentSpecialist = btn.dataset.specialist;
+                    updateChatHeader();
+                    
+                    // Cerrar menú móvil si está abierto
+                    if (window.innerWidth <= 768) {
+                        toggleMobileMenu();
+                    }
+                });
+            });
+        }
+
+        // Actualizar header según especialista
+        function updateChatHeader() {
+            const specialists = {
+                'general': { name: 'Experto JP_IA', desc: 'Análisis Completo de Reglamentos' },
+                'procedimientos': { name: 'Especialista en Procedimientos', desc: 'Trámites y Procesos Administrativos' },
+                'tecnico': { name: 'Especialista Técnico Gráfico', desc: 'Planos, Mapas y Documentos' },
+                'edificabilidad': { name: 'Especialista en Edificabilidad', desc: 'Construcción y Densidad' },
+                'zonificacion': { name: 'Especialista en Zonificación', desc: 'Clasificación del Suelo' },
+                'ambiental': { name: 'Especialista Ambiental', desc: 'Impacto e Infraestructura' },
+                'historico': { name: 'Especialista Histórico', desc: 'Conservación Cultural' }
+            };
+
+            const info = specialists[currentSpecialist];
+            const header = document.querySelector('.chat-header');
+            header.querySelector('h2').textContent = info.name;
+            header.querySelector('p').textContent = info.desc;
+        }
+
+        // Enviar mensaje
+        async function sendMessage() {
+            const input = document.getElementById('messageInput');
+            const message = input.value.trim();
+            
+            if (!message) return;
+
+            // Agregar mensaje del usuario
+            addMessage(message, 'user');
+            input.value = '';
+            
+            // Mostrar indicador de escritura
+            showTypingIndicator();
+
+            // Simular respuesta (aquí conectarías con tu API)
+            setTimeout(() => {
+                hideTypingIndicator();
+                const response = generateResponse(message);
+                addMessage(response, 'bot');
+            }, 1500);
+        }
+
+        // Agregar mensaje al chat
+        function addMessage(content, sender) {
+            const container = document.getElementById('messagesContainer');
+            
+            // Remover mensaje de bienvenida si existe
+            const welcome = container.querySelector('.welcome-message');
+            if (welcome) welcome.remove();
+
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${sender}`;
+            
+            const time = new Date().toLocaleTimeString('es-PR', { 
+                hour: '2-digit', 
+                minute: '2-digit' 
+            });
+
+            messageDiv.innerHTML = `
+                <div class="message-avatar">${sender === 'user' ? '👤' : '🤖'}</div>
+                <div class="message-content">
+                    <div class="message-header">
+                        <span>${sender === 'user' ? 'Tú' : 'Experto JP'}</span>
+                        <span>${time}</span>
+                    </div>
+                    <div class="message-text">${content}</div>
+                </div>
+            `;
+
+            container.appendChild(messageDiv);
+            container.scrollTop = container.scrollHeight;
+
+            // Guardar en historial
+            conversationHistory.push({ sender, content, time });
+        }
+
+        // Generar respuesta (simulada)
+        function generateResponse(query) {
+            const responses = {
+                'general': 'Basándome en tu consulta, puedo analizar los reglamentos de planificación aplicables. ¿Podrías darme más detalles sobre tu proyecto específico?',
+                'procedimientos': 'Para este procedimiento, necesitarás radicar una solicitud formal ante OGPe. Te explicaré los pasos específicos...',
+                'tecnico': 'Los planos deben cumplir con las especificaciones técnicas del Tomo 3. La escala recomendada es 1:500 para proyectos urbanos.',
+                'edificabilidad': 'Los parámetros de edificabilidad para tu zona incluyen: FAR, densidad, altura máxima y retiros mínimos.',
+                'zonificacion': 'La zonificación de ese distrito permite usos residenciales con ciertas restricciones. Déjame explicarte los detalles.',
+                'ambiental': 'Se requiere una evaluación de impacto ambiental para proyectos de esta magnitud. Los requisitos incluyen...',
+                'historico': 'Para sitios históricos, debes coordinar con SHPO. El proceso de conservación requiere aprobación especial.'
+            };
+
+            return responses[currentSpecialist] || responses['general'];
+        }
+
+        // Consulta rápida
+        function quickQuery(query) {
+            const input = document.getElementById('messageInput');
+            input.value = query;
+            sendMessage();
+        }
+
+        // Nueva conversación
+        function newChat() {
+            const container = document.getElementById('messagesContainer');
+            container.innerHTML = `
+                <div class="welcome-message">
+                    <h3>¡Nueva Conversación Iniciada! 🎯</h3>
+                    <p>¿En qué puedo ayudarte hoy?</p>
+                </div>
+            `;
+            conversationHistory = [];
+            
+            // Cerrar menú móvil si está abierto
+            if (window.innerWidth <= 768) {
+                const sidebar = document.querySelector('.sidebar');
+                const overlay = document.getElementById('mobileOverlay');
+                if (sidebar.classList.contains('active')) {
+                    toggleMobileMenu();
+                }
+            }
+        }
+
+        // Indicadores
+        function showTypingIndicator() {
+            document.getElementById('typingIndicator').classList.add('active');
+        }
+
+        function hideTypingIndicator() {
+            document.getElementById('typingIndicator').classList.remove('active');
+        }
+
+        // Auto-resize textarea
+        function autoResizeTextarea() {
+            const textarea = document.getElementById('messageInput');
+            textarea.addEventListener('input', function() {
+                this.style.height = 'auto';
+                this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+            });
+        }
+
+        // Manejar Enter
+        function handleKeyPress(event) {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                sendMessage();
+            }
+        }
+
+        // Toggle menú móvil
+        function toggleMobileMenu() {
+            const sidebar = document.querySelector('.sidebar');
+            const overlay = document.getElementById('mobileOverlay');
+            
+            sidebar.classList.toggle('active');
+            overlay.classList.toggle('active');
+        }
+    </script>
 </body>
 </html>

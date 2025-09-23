@@ -4,6 +4,7 @@
 .env.production
 .env.staging
 *.key
+.venv
 
 # Python
 __pycache__/

@@ -187,11 +187,14 @@ signal.signal(signal.SIGTERM, signal_handler)
 signal.signal(signal.SIGINT, signal_handler)
 
 # Cliente OpenAI con manejo de errores (Azure y estándar)
+deployment_name = "gpt-4.1"  # Variable global para deployment
+
 try:
     # Verificar si Azure OpenAI está configurado
     azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
     azure_key = os.getenv("AZURE_OPENAI_KEY")
     azure_api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview")
+    deployment_name = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4.1")
     
     if azure_endpoint and azure_key:
         # Usar Azure OpenAI
@@ -203,12 +206,13 @@ try:
         )
         logger.info("✅ Cliente Azure OpenAI configurado correctamente")
         logger.info(f"   📡 Endpoint: {azure_endpoint}")
-        logger.info(f"   🚀 Deployment: {os.getenv('AZURE_OPENAI_DEPLOYMENT_NAME', 'gpt-4.1')}")
+        logger.info(f"   🚀 Deployment: {deployment_name}")
     else:
         # Fallback a OpenAI estándar
         api_key = os.getenv("OPENAI_API_KEY")
         if api_key and api_key.strip():
             client = openai.OpenAI(api_key=api_key, timeout=OPENAI_TIMEOUT)
+            deployment_name = "gpt-4o"  # Modelo para OpenAI estándar
             logger.info("✅ Cliente OpenAI estándar configurado correctamente")
         else:
             logger.warning("⚠️ No hay API key configurada (ni Azure ni OpenAI)")
@@ -230,83 +234,149 @@ except ImportError as e:
     def login_required(f):
         return f
 
-# ===== IMPORTAR SISTEMA HÍBRIDO CORREGIDO =====
+# ===== IMPORTAR SISTEMA HÍBRIDO AVANZADO =====
+sistema_hibrido_avanzado = None
+
 try:
-    from sistema_hibrido import (
-        procesar_consulta_hibrida,
-        obtener_estadisticas_hibridas,
-        inicializar_router,
-        diagnosticar_sistema
-    )
-    logger.info("✅ Sistema Híbrido importado correctamente")
+    from sistema_hibrido_avanzado import crear_sistema_hibrido_avanzado
+    logger.info("🚀 Cargando Sistema Híbrido Avanzado...")
+    sistema_hibrido_avanzado = crear_sistema_hibrido_avanzado()
+    logger.info("✅ Sistema Híbrido Avanzado cargado exitosamente")
     sistema_hibrido_disponible = True
-    version_sistema = "v3.2_hibrido_corregido"
+    version_sistema = "v3.2_hibrido_avanzado_FAISS"
     
-    # ✅ INICIALIZAR ROUTER HÍBRIDO AL ARRANCAR
-    try:
-        logger.info("🚀 Inicializando router híbrido...")
-        inicializar_router()
-        logger.info("✅ Router híbrido inicializado correctamente")
-    except Exception as e:
-        logger.error(f"❌ Error inicializando router híbrido: {e}")
-        logger.error(f"📝 Traceback: {traceback.format_exc()}")
-        
-except ImportError as e:
-    logger.error(f"❌ Error importando sistema híbrido: {e}")
-    
-    # ✅ FALLBACK CORREGIDO - Compatible con tu experto_planificacion.py
-    try:
-        from experto_planificacion import cargar_experto
-        logger.info("✅ Fallback: Experto Planificación importado")
-        
-        # Cargar experto con manejo robusto de errores
+    # Función de procesamiento con sistema avanzado
+    def procesar_consulta_hibrida(consulta: str) -> Dict:
         try:
-            experto_planificacion = cargar_experto()
-            logger.info("✅ Experto cargado exitosamente")
-        except Exception as e:
-            logger.error(f"❌ Error cargando experto: {e}")
-            experto_planificacion = None
-        
-        sistema_hibrido_disponible = False
-        version_sistema = "v3.2_fallback_experto"
-        
-        # Función de fallback compatible
-        def procesar_consulta_hibrida(consulta: str) -> Dict:
-            try:
-                if experto_planificacion is None:
-                    return {
-                        'respuesta': "Sistema experto no disponible. Verifique configuración de OpenAI y datos.",
-                        'sistema_usado': 'error_config',
-                        'confianza': 0.1
-                    }
-                
-                # Usar el método answer() del experto actual
-                respuesta = experto_planificacion.answer(consulta)
-                return {
-                    'respuesta': respuesta,
-                    'sistema_usado': 'experto_planificacion',
-                    'confianza': 0.8  # Alta confianza con embeddings
-                }
-            except Exception as e:
-                logger.error(f"❌ Error en experto: {e}")
-                return {
-                    'respuesta': f"Error procesando consulta con experto: {str(e)}",
-                    'sistema_usado': 'error',
-                    'confianza': 0.1
-                }
-                
-    except ImportError as e2:
-        logger.error(f"❌ Error en fallback: {e2}")
-        sistema_hibrido_disponible = False
-        version_sistema = "v3.2_sin_sistema"
-        
-        # Función de emergencia ultra-básica
-        def procesar_consulta_hibrida(consulta: str) -> Dict:
+            # Obtener contexto híbrido
+            context, citations = sistema_hibrido_avanzado.get_context_for_query(consulta)
+            
+            # Crear prompt mejorado para Azure OpenAI
+            system_prompt = f"""Eres JP_IA, un experto en reglamentos de planificación de Puerto Rico.
+
+CONTEXTO RELEVANTE:
+{context}
+
+INSTRUCCIONES:
+- Responde basándote EXCLUSIVAMENTE en el contexto proporcionado
+- Si la información no está en el contexto, indica que necesitas más información específica
+- Incluye referencias a los TOMOS, Capítulos y Artículos relevantes
+- Sé preciso, profesional y didáctico
+- Si hay múltiples aspectos, organiza la respuesta en secciones claras
+- Usa un tono profesional pero accesible
+
+PREGUNTA DEL USUARIO: {consulta}"""
+
+            # Llamada a Azure OpenAI
+            response = client.chat.completions.create(
+                model=deployment_name,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": consulta}
+                ],
+                max_tokens=1000,
+                temperature=0.1,
+                timeout=REQUEST_TIMEOUT
+            )
+            
+            bot_response = response.choices[0].message.content.strip()
+            
             return {
-                'respuesta': "Sistema de consultas temporalmente no disponible. Por favor, contacte soporte técnico.",
-                'sistema_usado': 'emergencia',
+                'respuesta': bot_response,
+                'sistema_usado': 'hibrido_avanzado_FAISS',
+                'confianza': 0.95,
+                'citas': citations,
+                'contexto_chars': len(context)
+            }
+        except Exception as e:
+            logger.error(f"❌ Error en sistema avanzado: {e}")
+            return {
+                'respuesta': f"Error en sistema híbrido avanzado: {str(e)}",
+                'sistema_usado': 'error_avanzado',
                 'confianza': 0.1
             }
+    
+except Exception as e:
+    logger.error(f"❌ Error cargando Sistema Híbrido Avanzado: {e}")
+    logger.error(f"📝 Traceback: {traceback.format_exc()}")
+    
+    # Fallback al sistema híbrido original
+    try:
+        from sistema_hibrido import (
+            procesar_consulta_hibrida,
+            obtener_estadisticas_hibridas,
+            inicializar_router,
+            diagnosticar_sistema
+        )
+        logger.info("✅ Fallback: Sistema Híbrido original importado")
+        sistema_hibrido_disponible = True
+        version_sistema = "v3.2_hibrido_fallback"
+        
+        # ✅ INICIALIZAR ROUTER HÍBRIDO AL ARRANCAR
+        try:
+            logger.info("🚀 Inicializando router híbrido...")
+            inicializar_router()
+            logger.info("✅ Router híbrido inicializado correctamente")
+        except Exception as e:
+            logger.error(f"❌ Error inicializando router híbrido: {e}")
+            logger.error(f"📝 Traceback: {traceback.format_exc()}")
+            
+    except ImportError as e:
+        logger.error(f"❌ Error importando sistema híbrido: {e}")
+        
+        # ✅ FALLBACK CORREGIDO - Compatible con tu experto_planificacion.py
+        try:
+            from experto_planificacion import cargar_experto
+            logger.info("✅ Fallback: Experto Planificación importado")
+            
+            # Cargar experto con manejo robusto de errores
+            try:
+                experto_planificacion = cargar_experto()
+                logger.info("✅ Experto cargado exitosamente")
+            except Exception as e:
+                logger.error(f"❌ Error cargando experto: {e}")
+                experto_planificacion = None
+            
+            sistema_hibrido_disponible = False
+            version_sistema = "v3.2_fallback_experto"
+            
+            # Función de fallback compatible
+            def procesar_consulta_hibrida(consulta: str) -> Dict:
+                try:
+                    if experto_planificacion is None:
+                        return {
+                            'respuesta': "Sistema experto no disponible. Verifique configuración de OpenAI y datos.",
+                            'sistema_usado': 'error_config',
+                            'confianza': 0.1
+                        }
+                    
+                    # Usar el método answer() del experto actual
+                    respuesta = experto_planificacion.answer(consulta)
+                    return {
+                        'respuesta': respuesta,
+                        'sistema_usado': 'experto_planificacion',
+                        'confianza': 0.8  # Alta confianza con embeddings
+                    }
+                except Exception as e:
+                    logger.error(f"❌ Error en experto: {e}")
+                    return {
+                        'respuesta': f"Error procesando consulta con experto: {str(e)}",
+                        'sistema_usado': 'error',
+                        'confianza': 0.1
+                    }
+                    
+        except ImportError as e2:
+            logger.error(f"❌ Error en fallback: {e2}")
+            sistema_hibrido_disponible = False
+            version_sistema = "v3.2_sin_sistema"
+            
+            # Función de emergencia ultra-básica
+            def procesar_consulta_hibrida(consulta: str) -> Dict:
+                return {
+                    'respuesta': "Sistema de consultas temporalmente no disponible. Por favor, contacte soporte técnico.",
+                    'sistema_usado': 'emergencia',
+                    'confianza': 0.1
+                }
 
 # Configuraciones del sistema
 CONFIG = {

@@ -1,792 +1,503 @@
 /**
- * JP_IA - Sistema de Chat Profesional
- * Versión 2.0 - Optimizada y Moderna
+ * JP_IA - Sistema de Chat Moderno v4.0
+ * Interfaz Avanzada con RAG Híbrido
  */
 
-// ===== CONFIGURACIÓN GLOBAL =====
+// ===== CONFIGURACIÓN =====
 const CONFIG = {
     API_ENDPOINT: '/chat',
     MAX_MESSAGE_LENGTH: 1000,
-    AUTO_SAVE_INTERVAL: 30000,
-    TYPING_DELAY: 1000,
+    TYPING_DELAY: 1500,
     ANIMATION_DURATION: 300,
-    TOAST_DURATION: 4000
+    AUTO_SCROLL_THRESHOLD: 100
 };
 
 // ===== ESTADO GLOBAL =====
 const AppState = {
     currentSessionId: null,
-    isConnected: true,
-    isDarkMode: false,
     isTyping: false,
-    messageQueue: [],
     chatHistory: [],
-    currentSpecialist: 'general' // Nuevo: especialista actual
+    currentSpecialist: 'general',
+    messageQueue: []
 };
 
 // ===== INICIALIZACIÓN =====
-function initializeApp() {
-    console.log('🚀 Inicializando JP_IA v2.0...');
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('🚀 Inicializando JP_IA v4.0...');
     
-    // Generar ID de sesión
     AppState.currentSessionId = generateSessionId();
-    
-    // Configurar event listeners
     setupEventListeners();
-    
-    // Configurar tema
-    initializeTheme();
-    
-    // Configurar auto-resize del textarea
-    setupTextareaAutoResize();
-    
-    // Cargar historial si existe
-    loadChatHistory();
-    
-    // Configurar auto-guardado
-    setupAutoSave();
-    
-    // Ocultar loading screen
-    hideLoadingScreen();
-    
-    // Configurar tooltips
-    setupTooltips();
+    initializeInterface();
     
     console.log('✅ JP_IA inicializado correctamente');
-}
+});
 
-// ===== EVENT LISTENERS =====
+// ===== CONFIGURACIÓN DE EVENTOS =====
 function setupEventListeners() {
-    const messageInput = document.getElementById('message-input');
-    const sendButton = document.getElementById('send-button');
-    const mobileToggle = document.getElementById('mobile-menu-toggle');
+    // Input de mensaje
+    const messageInput = document.getElementById('messageInput');
+    const sendButton = document.getElementById('sendButton');
     
-    // Entrada de mensajes
     if (messageInput) {
-        messageInput.addEventListener('input', handleInputChange);
         messageInput.addEventListener('keydown', handleKeyDown);
+        messageInput.addEventListener('input', handleInputChange);
         messageInput.addEventListener('paste', handlePaste);
     }
     
-    // Botón de envío
     if (sendButton) {
-        sendButton.addEventListener('click', handleSendMessage);
+        sendButton.addEventListener('click', sendMessage);
     }
+    
+    // Navegación de especialistas
+    document.querySelectorAll('.nav-link').forEach(link => {
+        link.addEventListener('click', function() {
+            const specialist = this.dataset.specialist;
+            switchSpecialist(specialist);
+        });
+    });
     
     // Toggle móvil
+    const mobileToggle = document.getElementById('mobileToggle');
+    const sidebarOverlay = document.getElementById('sidebarOverlay');
+    
     if (mobileToggle) {
-        mobileToggle.addEventListener('click', toggleMobileMenu);
+        mobileToggle.addEventListener('click', toggleSidebar);
     }
     
-    // Atajos de teclado globales
-    document.addEventListener('keydown', handleGlobalKeyboard);
+    if (sidebarOverlay) {
+        sidebarOverlay.addEventListener('click', closeSidebar);
+    }
     
-    // Eventos de conexión
-    window.addEventListener('online', handleConnectionChange);
-    window.addEventListener('offline', handleConnectionChange);
-    
-    // Prevenir envío accidental al cerrar
-    window.addEventListener('beforeunload', handleBeforeUnload);
+    // Auto-scroll al hacer scroll
+    const chatContainer = document.getElementById('chatContainer');
+    if (chatContainer) {
+        chatContainer.addEventListener('scroll', handleChatScroll);
+    }
 }
 
-// ===== MANEJO DE MENSAJES =====
-async function handleSendMessage() {
-    const messageInput = document.getElementById('message-input');
-    const message = messageInput.value.trim();
+// ===== INICIALIZACIÓN DE INTERFAZ =====
+function initializeInterface() {
+    // Auto-resize textarea
+    autoResizeTextarea();
     
+    // Estado inicial del botón
+    updateSendButton();
+    
+    // Inicializar especialista por defecto
+    switchSpecialist('general');
+    
+    // Mostrar mensaje de bienvenida
+    showWelcomeMessage();
+}
+
+// ===== MANEJO DE ENTRADA =====
+function handleKeyDown(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+    }
+    
+    if (e.key === 'Escape') {
+        clearInput();
+    }
+}
+
+function handleInputChange() {
+    autoResizeTextarea();
+    updateSendButton();
+    
+    // Remover mensaje de bienvenida al empezar a escribir
+    const welcomeMessage = document.getElementById('welcomeMessage');
+    if (welcomeMessage && this.value.trim()) {
+        welcomeMessage.style.display = 'none';
+    }
+}
+
+function handlePaste(e) {
+    // Prevenir pegado de contenido muy largo
+    setTimeout(() => {
+        const input = e.target;
+        if (input.value.length > CONFIG.MAX_MESSAGE_LENGTH) {
+            input.value = input.value.substring(0, CONFIG.MAX_MESSAGE_LENGTH);
+            showToast('Mensaje truncado al límite máximo', 'warning');
+        }
+        autoResizeTextarea();
+        updateSendButton();
+    }, 10);
+}
+
+// ===== FUNCIONES DE TEXTAREA =====
+function autoResizeTextarea() {
+    const textarea = document.getElementById('messageInput');
+    if (!textarea) return;
+    
+    textarea.style.height = 'auto';
+    textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px';
+}
+
+function updateSendButton() {
+    const input = document.getElementById('messageInput');
+    const button = document.getElementById('sendButton');
+    
+    if (!input || !button) return;
+    
+    const hasText = input.value.trim().length > 0;
+    const withinLimit = input.value.length <= CONFIG.MAX_MESSAGE_LENGTH;
+    
+    button.disabled = !hasText || !withinLimit || AppState.isTyping;
+    
+    // Actualizar ícono según estado
+    const icon = button.querySelector('i');
+    if (icon) {
+        if (AppState.isTyping) {
+            icon.className = 'fas fa-spinner fa-spin';
+        } else {
+            icon.className = 'fas fa-paper-plane';
+        }
+    }
+}
+
+function clearInput() {
+    const input = document.getElementById('messageInput');
+    if (input) {
+        input.value = '';
+        autoResizeTextarea();
+        updateSendButton();
+    }
+}
+
+// ===== ENVÍO DE MENSAJES =====
+async function sendMessage() {
+    const input = document.getElementById('messageInput');
+    if (!input) return;
+    
+    const message = input.value.trim();
     if (!message || AppState.isTyping) return;
     
-    // Validar longitud del mensaje
+    // Validaciones
     if (message.length > CONFIG.MAX_MESSAGE_LENGTH) {
-        showToast('El mensaje es demasiado largo', 'error');
+        showToast('Mensaje demasiado largo', 'error');
         return;
     }
     
-    // Limpiar input y actualizar UI
-    messageInput.value = '';
-    updateCharacterCount();
-    updateSendButtonState();
-    hideSuggestions();
+    // Limpiar input y actualizar estado
+    clearInput();
+    AppState.isTyping = true;
+    updateSendButton();
+    
+    // Agregar mensaje del usuario
+    addUserMessage(message);
+    
+    // Mostrar indicador de tipeo
+    showTypingIndicator();
     
     try {
-        // Agregar mensaje del usuario
-        addMessage(message, 'user');
-        
-        // Mostrar indicador de escritura
-        showTypingIndicator();
-        AppState.isTyping = true;
-        
-        // Enviar a la API
-        const response = await sendToAPI(message);
-        
-        // Ocultar indicador y mostrar respuesta
-        hideTypingIndicator();
-        addMessage(response, 'bot');
-        
-        // Guardar en historial
-        saveToHistory(message, response);
-        
-        // Mostrar sugerencias relacionadas
-        showRelatedSuggestions(message);
-        
-    } catch (error) {
-        hideTypingIndicator();
-        handleAPIError(error);
-    } finally {
-        AppState.isTyping = false;
-        messageInput.focus();
-    }
-}
-
-async function sendToAPI(message) {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000);
-    
-    try {
+        // Enviar solicitud
         const response = await fetch(CONFIG.API_ENDPOINT, {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json',
+                'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-            message: message,
-            session_id: AppState.currentSessionId,
-            specialist: AppState.currentSpecialist // Enviar especialista actual
-        }),
-            signal: controller.signal
+                message: message,
+                specialist: AppState.currentSpecialist,
+                session_id: AppState.currentSessionId
+            })
         });
         
-        clearTimeout(timeoutId);
-        
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        // Procesar respuesta
+        if (response.ok) {
+            const data = await response.json();
+            hideTypingIndicator();
+            
+            if (data.success) {
+                addBotMessage(data.message, data.sources);
+            } else {
+                addErrorMessage(data.error || 'Error desconocido');
+            }
+        } else {
+            hideTypingIndicator();
+            addErrorMessage(`Error del servidor: ${response.status}`);
         }
-        
-        const data = await response.json();
-        
-        if (data.error) {
-            throw new Error(data.error);
-        }
-        
-        return data.response || 'Lo siento, no pude generar una respuesta adecuada.';
         
     } catch (error) {
-        clearTimeout(timeoutId);
-        
-        if (error.name === 'AbortError') {
-            throw new Error('Tiempo de espera agotado. Por favor, intenta nuevamente.');
-        }
-        
-        throw error;
+        console.error('Error enviando mensaje:', error);
+        hideTypingIndicator();
+        addErrorMessage('Error de conexión. Verifique su internet.');
+    } finally {
+        AppState.isTyping = false;
+        updateSendButton();
     }
 }
 
-function enviarConsultaRapida(consulta) {
-    const messageInput = document.getElementById('message-input');
-    messageInput.value = consulta;
-    messageInput.focus();
-    
-    // Efecto visual de enfoque
-    messageInput.style.transform = 'scale(1.02)';
-    setTimeout(() => {
-        messageInput.style.transform = 'scale(1)';
-        handleSendMessage();
-    }, 150);
-}
-
 // ===== MANEJO DE MENSAJES EN UI =====
-function addMessage(content, sender, timestamp = null) {
-    const container = document.getElementById('chat-container');
-    const messageDiv = document.createElement('div');
-    const time = timestamp || new Date().toLocaleTimeString('es-PR', {
-        hour: '2-digit',
-        minute: '2-digit'
-    });
+function addUserMessage(text) {
+    const messageId = `msg-${Date.now()}-user`;
+    const time = formatTime(new Date());
     
-    messageDiv.className = `message ${sender}-message`;
-    
-    const avatarIcon = sender === 'user' ? 'fas fa-user' : 'fas fa-robot';
-    const senderName = sender === 'user' ? 'Tú' : 'Experto JP';
-    
-    messageDiv.innerHTML = `
-        <div class="message-avatar">
-            <i class="${avatarIcon}"></i>
-        </div>
-        <div class="message-content">
-            <div class="message-header">
-                <span class="sender-name">${senderName}</span>
-                <span class="message-time">${time}</span>
-                ${sender === 'bot' ? `
-                    <div class="message-actions">
-                        <button class="message-action" onclick="copyMessage(this)" title="Copiar mensaje">
-                            <i class="fas fa-copy"></i>
-                        </button>
-                        <button class="message-action" onclick="regenerateResponse(this)" title="Regenerar respuesta">
-                            <i class="fas fa-redo"></i>
-                        </button>
-                    </div>
-                ` : ''}
+    const messageHtml = `
+        <div class="message user-message" id="${messageId}">
+            <div class="message-content">
+                <div class="message-bubble">
+                    <div class="message-text">${escapeHtml(text)}</div>
+                    <div class="message-time">${time}</div>
+                </div>
             </div>
-            <div class="message-text">
-                ${formatMessageContent(content)}
+            <div class="message-avatar">
+                <i class="fas fa-user"></i>
             </div>
         </div>
     `;
     
-    // Agregar al container y hacer scroll
-    container.appendChild(messageDiv);
-    
-    // Animación de entrada
-    requestAnimationFrame(() => {
-        messageDiv.style.opacity = '0';
-        messageDiv.style.transform = 'translateY(20px)';
-        
-        requestAnimationFrame(() => {
-            messageDiv.style.transition = `all ${CONFIG.ANIMATION_DURATION}ms ease-out`;
-            messageDiv.style.opacity = '1';
-            messageDiv.style.transform = 'translateY(0)';
-        });
-    });
-    
+    appendMessage(messageHtml);
     scrollToBottom();
-    return messageDiv;
-}
-
-function formatMessageContent(content) {
-    console.log('🔧 Procesando contenido del mensaje:', content.substring(0, 100));
     
-    // Si ya contiene HTML (como tablas), devolverlo directamente
-    if (content.includes('<table')) {
-        console.log('📊 Contenido HTML detectado, pasando directamente');
-        return content
-            .replace(/\*\*(.*?)\*\*/g, '<strong class="texto-importante">$1</strong>')
-            .replace(/\*(.*?)\*/g, '<em class="texto-enfasis">$1</em>')
-            .replace(/•\s*(.*?)(?=\n|$)/g, '<div class="item-lista">• $1</div>')
-            .replace(/---/g, '<div class="separador"></div>');
-    }
-    
-    // Detectar y formatear tablas ASCII (fallback)
-    content = formatTables(content);
-    
-    // Formateo simple y limpio
-    return content
-        // Remover marcadores técnicos innecesarios
-        .replace(/🤖\s*/g, '')
-        .replace(/\*\*Sistema:\*\*/g, '')
-        .replace(/\*\*Respuesta:\*\*/g, '')
-        .replace(/\*\*JP_IA:\*\*/g, '')
-        
-        // Formateo básico pero elegante
-        .replace(/\*\*(.*?)\*\*/g, '<strong class="texto-importante">$1</strong>')
-        .replace(/\*(.*?)\*/g, '<em class="texto-enfasis">$1</em>')
-        
-        // Listas simples
-        .replace(/•\s*(.*?)(?=\n|$)/g, '<div class="item-lista">• $1</div>')
-        
-        // Separadores de sección
-        .replace(/---/g, '<div class="separador"></div>')
-        
-        // Párrafos naturales
-        .replace(/\n\n/g, '</p><p class="parrafo">')
-        .replace(/\n/g, '<br>');
-}
-
-function formatTables(content) {
-    console.log('🔍 Detectando tablas en contenido:', content.substring(0, 200));
-    
-    // Detectar tablas ASCII con bordes ┌─┐├─┤└─┘
-    const tableRegex = /┌[─┬]+┐[\s\S]*?└[─┴]+┘/g;
-    
-    // También detectar formato simple de tabla
-    const simpleTableRegex = /TABLA DE [^:]+:\s*\n([\s\S]*?)(?=\n\n|\n[A-Z]|$)/g;
-    
-    let result = content;
-    
-    // Primero intentar formato ASCII completo
-    result = result.replace(tableRegex, (match) => {
-        console.log('📊 Tabla ASCII detectada:', match.substring(0, 100));
-        return convertAsciiTableToHtml(match);
+    // Guardar en historial
+    AppState.chatHistory.push({
+        type: 'user',
+        text: text,
+        timestamp: new Date().toISOString()
     });
+}
+
+function addBotMessage(text, sources = []) {
+    const messageId = `msg-${Date.now()}-bot`;
+    const time = formatTime(new Date());
     
-    // Luego intentar formato simple
-    result = result.replace(simpleTableRegex, (match, tableContent) => {
-        console.log('📋 Tabla simple detectada:', match.substring(0, 100));
-        return convertSimpleTableToHtml(match, tableContent);
+    // Procesar texto para formato markdown básico
+    const formattedText = formatBotResponse(text);
+    
+    // Crear HTML de citas si existen
+    let citationsHtml = '';
+    if (sources && sources.length > 0) {
+        citationsHtml = `
+            <div class="message-citations">
+                <strong>📚 Fuentes:</strong>
+                ${sources.map(source => `<span class="citation">${escapeHtml(source)}</span>`).join(' ')}
+            </div>
+        `;
+    }
+    
+    const messageHtml = `
+        <div class="message bot-message" id="${messageId}">
+            <div class="message-avatar">
+                <i class="fas fa-robot"></i>
+            </div>
+            <div class="message-content">
+                <div class="message-bubble">
+                    <div class="message-text">${formattedText}</div>
+                    ${citationsHtml}
+                    <div class="message-time">${time}</div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    appendMessage(messageHtml);
+    scrollToBottom();
+    
+    // Guardar en historial
+    AppState.chatHistory.push({
+        type: 'bot',
+        text: text,
+        sources: sources,
+        timestamp: new Date().toISOString()
     });
-    
-    return result;
 }
 
-function convertAsciiTableToHtml(asciiTable) {
-    const lines = asciiTable.split('\n');
-    let htmlTable = '<div class="tabla-formal"><table class="tabla-profesional">';
+function addErrorMessage(errorText) {
+    const messageId = `msg-${Date.now()}-error`;
+    const time = formatTime(new Date());
     
-    let isHeader = true;
+    const messageHtml = `
+        <div class="message bot-message" id="${messageId}">
+            <div class="message-avatar" style="background: var(--jp-error);">
+                <i class="fas fa-exclamation-triangle"></i>
+            </div>
+            <div class="message-content">
+                <div class="message-bubble" style="border-left: 4px solid var(--jp-error);">
+                    <div class="message-text">
+                        <strong>❌ Error:</strong> ${escapeHtml(errorText)}
+                    </div>
+                    <div class="message-time">${time}</div>
+                </div>
+            </div>
+        </div>
+    `;
     
-    for (let line of lines) {
-        // Saltar líneas de borde
-        if (line.includes('┌') || line.includes('└') || line.includes('├')) {
-            continue;
-        }
-        
-        // Procesar filas de datos
-        if (line.includes('│')) {
-            const cells = line.split('│')
-                .slice(1, -1) // Remover primero y último elemento vacío
-                .map(cell => cell.trim());
-            
-            if (cells.length > 0 && cells.some(cell => cell.length > 0)) {
-                const tag = isHeader ? 'th' : 'td';
-                const rowClass = isHeader ? 'tabla-header' : 'tabla-row';
-                
-                htmlTable += `<tr class="${rowClass}">`;
-                for (let cell of cells) {
-                    htmlTable += `<${tag} class="tabla-cell">${cell}</${tag}>`;
-                }
-                htmlTable += '</tr>';
-                
-                isHeader = false;
-            }
-        }
-    }
+    appendMessage(messageHtml);
+    scrollToBottom();
     
-    htmlTable += '</table></div>';
-    return htmlTable;
+    showToast('Error en la respuesta', 'error');
 }
 
-function convertSimpleTableToHtml(fullMatch, tableContent) {
-    // Para tablas que no tienen formato ASCII pero están estructuradas
-    const lines = tableContent.split('\n').filter(line => line.trim());
+function appendMessage(messageHtml) {
+    const chatContainer = document.getElementById('chatContainer');
+    if (!chatContainer) return;
     
-    if (lines.length < 2) return fullMatch;
-    
-    let htmlTable = '<div class="tabla-formal"><table class="tabla-profesional">';
-    
-    // Intentar detectar si hay headers y datos
-    let isHeader = true;
-    
-    for (let line of lines) {
-        line = line.trim();
-        if (!line) continue;
-        
-        // Detectar si es una línea de datos (contiene al menos dos elementos separados)
-        if (line.includes(':') || line.includes('-') || line.includes('│')) {
-            let cells = [];
-            
-            if (line.includes('│')) {
-                cells = line.split('│').map(cell => cell.trim()).filter(cell => cell);
-            } else if (line.includes(':')) {
-                const parts = line.split(':');
-                cells = [parts[0].trim(), parts.slice(1).join(':').trim()];
-            } else {
-                cells = [line];
-            }
-            
-            if (cells.length > 0) {
-                const tag = isHeader ? 'th' : 'td';
-                const rowClass = isHeader ? 'tabla-header' : 'tabla-row';
-                
-                htmlTable += `<tr class="${rowClass}">`;
-                for (let cell of cells) {
-                    htmlTable += `<${tag} class="tabla-cell">${cell}</${tag}>`;
-                }
-                htmlTable += '</tr>';
-                
-                isHeader = false;
-            }
-        }
+    // Remover mensaje de bienvenida si existe
+    const welcomeMessage = document.getElementById('welcomeMessage');
+    if (welcomeMessage) {
+        welcomeMessage.style.display = 'none';
     }
     
-    htmlTable += '</table></div>';
-    
-    // Si no se generó contenido de tabla válido, devolver original
-    if (htmlTable === '<div class="tabla-formal"><table class="tabla-profesional"></table></div>') {
-        return fullMatch;
-    }
-    
-    return htmlTable;
+    chatContainer.insertAdjacentHTML('beforeend', messageHtml);
 }
 
-// ===== INDICADORES VISUALES =====
+// ===== INDICADOR DE TIPEO =====
 function showTypingIndicator() {
-    const indicator = document.getElementById('typing-indicator');
-    if (indicator) {
-        indicator.style.display = 'block';
-        scrollToBottom();
-    }
+    const typingId = 'typing-indicator';
+    
+    // Remover indicador existente
+    const existing = document.getElementById(typingId);
+    if (existing) existing.remove();
+    
+    const typingHtml = `
+        <div class="message bot-message" id="${typingId}">
+            <div class="message-avatar">
+                <i class="fas fa-robot"></i>
+            </div>
+            <div class="message-content">
+                <div class="typing-indicator">
+                    <span>JP_IA está escribiendo</span>
+                    <div class="typing-dots">
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    appendMessage(typingHtml);
+    scrollToBottom();
 }
 
 function hideTypingIndicator() {
     const indicator = document.getElementById('typing-indicator');
     if (indicator) {
-        indicator.style.display = 'none';
+        indicator.remove();
     }
 }
 
-function updateConnectionStatus(isConnected) {
-    const statusElement = document.getElementById('connection-status');
-    if (!statusElement) return;
+// ===== NAVEGACIÓN DE ESPECIALISTAS =====
+function switchSpecialist(specialistId) {
+    AppState.currentSpecialist = specialistId;
     
-    AppState.isConnected = isConnected;
+    // Actualizar UI de navegación
+    document.querySelectorAll('.nav-link').forEach(link => {
+        link.classList.toggle('active', link.dataset.specialist === specialistId);
+    });
     
-    statusElement.innerHTML = isConnected 
-        ? '<i class="fas fa-wifi"></i><span>Conectado</span>'
-        : '<i class="fas fa-wifi-slash"></i><span>Sin conexión</span>';
+    // Actualizar header
+    updateSpecialistHeader(specialistId);
     
-    statusElement.className = `connection-status ${isConnected ? 'connected' : 'disconnected'}`;
+    // Limpiar chat y mostrar bienvenida
+    clearChat();
+    showWelcomeMessage();
 }
 
-// ===== MANEJO DE ENTRADA =====
-function handleInputChange(event) {
-    const input = event.target;
-    const value = input.value;
-    
-    updateCharacterCount();
-    updateSendButtonState();
-    
-    // Auto-completado y sugerencias
-    if (value.length > 2) {
-        showSuggestions(value);
-    } else {
-        hideSuggestions();
-    }
-}
-
-function handleKeyDown(event) {
-    const input = event.target;
-    
-    if (event.key === 'Enter') {
-        if (event.ctrlKey || event.metaKey) {
-            event.preventDefault();
-            handleSendMessage();
-        } else if (!event.shiftKey) {
-            event.preventDefault();
-            handleSendMessage();
+function updateSpecialistHeader(specialistId) {
+    const specialists = {
+        general: {
+            title: 'Chat General',
+            subtitle: 'Análisis completo de todos los Reglamentos de Planificación',
+            icon: 'fas fa-comments'
+        },
+        procedimientos: {
+            title: 'Procedimientos',
+            subtitle: 'Trámites administrativos y más',
+            icon: 'fas fa-clipboard-list'
+        },
+        tecnico: {
+            title: 'Técnico Gráfico',
+            subtitle: 'Planos, mapas y documentos técnicos',
+            icon: 'fas fa-drafting-compass'
+        },
+        edificabilidad: {
+            title: 'Edificabilidad',
+            subtitle: 'Construcción y densidad urbana',
+            icon: 'fas fa-building'
+        },
+        zonificacion: {
+            title: 'Zonificación',
+            subtitle: 'Clasificación de uso de suelo',
+            icon: 'fas fa-map-marked-alt'
+        },
+        ambiental: {
+            title: 'Ambiental',
+            subtitle: 'Impacto ambiental y mitigación',
+            icon: 'fas fa-leaf'
+        },
+        permisos: {
+            title: 'Permisos y licencias',
+            subtitle: 'Autorizaciones y licencias',
+            icon: 'fas fa-file-signature'
+        },
+        aspectos: {
+            title: 'Aspectos ambientales',
+            subtitle: 'Normativas ambientales',
+            icon: 'fas fa-balance-scale'
+        },
+        historico: {
+            title: 'Histórico',
+            subtitle: 'Conservación histórica y cultural',
+            icon: 'fas fa-landmark'
         }
+    };
+    
+    const specialist = specialists[specialistId] || specialists.general;
+    
+    const titleElement = document.getElementById('specialistTitle');
+    const subtitleElement = document.getElementById('specialistDescription');
+    
+    if (titleElement) {
+        titleElement.innerHTML = `<i class="${specialist.icon}"></i> ${specialist.title}`;
     }
     
-    // Navegación con teclas de flecha en sugerencias
-    if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
-        handleSuggestionNavigation(event);
+    if (subtitleElement) {
+        subtitleElement.textContent = specialist.subtitle;
     }
 }
 
-function handleGlobalKeyboard(event) {
-    if (event.ctrlKey || event.metaKey) {
-        switch(event.key) {
-            case 'k':
-                event.preventDefault();
-                focusMessageInput();
-                break;
-            case 'l':
-                event.preventDefault();
-                clearChat();
-                break;
-            case 's':
-                event.preventDefault();
-                exportChat();
-                break;
-            case '/':
-                event.preventDefault();
-                showHelp();
-                break;
-        }
+// ===== FUNCIONES DE UI =====
+function clearChat() {
+    const chatContainer = document.getElementById('chatContainer');
+    if (chatContainer) {
+        chatContainer.innerHTML = '';
     }
-    
-    if (event.key === 'Escape') {
-        closeAllModals();
-        hideSuggestions();
-    }
+    AppState.chatHistory = [];
 }
 
-function updateCharacterCount() {
-    const input = document.getElementById('message-input');
-    const counter = document.getElementById('char-count');
-    
-    if (input && counter) {
-        const count = input.value.length;
-        counter.textContent = count;
-        
-        // Cambiar color según límite
-        if (count > CONFIG.MAX_MESSAGE_LENGTH * 0.9) {
-            counter.style.color = '#dc2626';
-        } else if (count > CONFIG.MAX_MESSAGE_LENGTH * 0.7) {
-            counter.style.color = '#d97706';
-        } else {
-            counter.style.color = '#64748b';
-        }
+function showWelcomeMessage() {
+    const welcomeMessage = document.getElementById('welcomeMessage');
+    if (welcomeMessage) {
+        welcomeMessage.style.display = 'block';
     }
-}
-
-function updateSendButtonState() {
-    const input = document.getElementById('message-input');
-    const button = document.getElementById('send-button');
-    
-    if (input && button) {
-        const hasText = input.value.trim().length > 0;
-        const isValidLength = input.value.length <= CONFIG.MAX_MESSAGE_LENGTH;
-        
-        button.disabled = !hasText || !isValidLength || AppState.isTyping || !AppState.isConnected;
-        
-        // Efecto visual
-        if (hasText && isValidLength) {
-            button.classList.add('ready');
-        } else {
-            button.classList.remove('ready');
-        }
-    }
-}
-
-// ===== FUNCIONES DE UTILIDAD =====
-function generateSessionId() {
-    return `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 }
 
 function scrollToBottom(smooth = true) {
-    const container = document.getElementById('chat-container');
-    if (container) {
-        container.scrollTo({
-            top: container.scrollHeight,
-            behavior: smooth ? 'smooth' : 'auto'
-        });
-    }
-}
-
-function focusMessageInput() {
-    const input = document.getElementById('message-input');
-    if (input) {
-        input.focus();
-        input.setSelectionRange(input.value.length, input.value.length);
-    }
-}
-
-// ===== SISTEMA DE NOTIFICACIONES =====
-function showToast(message, type = 'info', duration = CONFIG.TOAST_DURATION) {
-    const container = document.getElementById('toast-container');
-    if (!container) return;
+    const chatContainer = document.getElementById('chatContainer');
+    if (!chatContainer) return;
     
-    const toast = document.createElement('div');
-    toast.className = `toast toast-${type}`;
-    
-    const icons = {
-        success: 'fas fa-check-circle',
-        error: 'fas fa-exclamation-circle',
-        warning: 'fas fa-exclamation-triangle',
-        info: 'fas fa-info-circle'
+    const scrollOptions = {
+        top: chatContainer.scrollHeight,
+        behavior: smooth ? 'smooth' : 'auto'
     };
     
-    toast.innerHTML = `
-        <i class="${icons[type] || icons.info}"></i>
-        <span>${message}</span>
-        <button class="toast-close" onclick="this.parentElement.remove()">
-            <i class="fas fa-times"></i>
-        </button>
-    `;
-    
-    container.appendChild(toast);
-    
-    // Animación de entrada
-    requestAnimationFrame(() => {
-        toast.style.transform = 'translateX(0)';
-        toast.style.opacity = '1';
-    });
-    
-    // Auto-remove
-    setTimeout(() => {
-        if (toast.parentElement) {
-            toast.style.transform = 'translateX(100%)';
-            toast.style.opacity = '0';
-            setTimeout(() => toast.remove(), 300);
-        }
-    }, duration);
+    chatContainer.scrollTo(scrollOptions);
 }
 
-// ===== FUNCIONES DE CHAT =====
-function clearChat() {
-    if (!confirm('¿Estás seguro de que quieres limpiar toda la conversación?')) {
-        return;
-    }
-    
-    const container = document.getElementById('chat-container');
-    const welcomeMessage = container.querySelector('.welcome-message')?.parentElement;
-    
-    // Limpiar contenido manteniendo mensaje de bienvenida
-    container.innerHTML = '';
-    if (welcomeMessage) {
-        container.appendChild(welcomeMessage);
-    }
-    
-    // Limpiar historial
-    AppState.chatHistory = [];
-    localStorage.removeItem(`chat_history_${AppState.currentSessionId}`);
-    
-    // Nuevo ID de sesión
-    AppState.currentSessionId = generateSessionId();
-    
-    showToast('Conversación limpiada correctamente', 'success');
+function handleChatScroll() {
+    // Lógica para manejar scroll si es necesario
+    // Por ejemplo, marcar mensajes como leídos
 }
 
-// Función específica para el botón New Chat
-function iniciarNuevoChat() {
-    clearChat();
-}
-
-function exportChat() {
-    const messages = AppState.chatHistory;
-    
-    if (messages.length === 0) {
-        showToast('No hay mensajes para exportar', 'warning');
-        return;
-    }
-    
-    let content = `Conversación JP_IA - ${new Date().toLocaleString('es-PR')}\n`;
-    content += '='.repeat(60) + '\n\n';
-    
-    messages.forEach((msg, index) => {
-        content += `[${msg.timestamp}] ${msg.sender === 'user' ? 'Usuario' : 'JP_IA'}:\n`;
-        content += `${msg.content}\n\n`;
-    });
-    
-    downloadFile(content, `JP_IA_Chat_${new Date().toISOString().split('T')[0]}.txt`);
-    showToast('Conversación exportada correctamente', 'success');
-}
-
-function downloadFile(content, filename) {
-    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-}
-
-// ===== TEMA Y CONFIGURACIÓN =====
-function initializeTheme() {
-    const savedTheme = localStorage.getItem('jp-ia-theme');
-    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    
-    AppState.isDarkMode = savedTheme === 'dark' || (!savedTheme && prefersDark);
-    updateTheme();
-}
-
-function toggleTheme() {
-    AppState.isDarkMode = !AppState.isDarkMode;
-    updateTheme();
-    
-    const message = AppState.isDarkMode ? 'Tema oscuro activado' : 'Tema claro activado';
-    showToast(message, 'info');
-}
-
-function updateTheme() {
-    const html = document.documentElement;
-    const themeIcon = document.getElementById('theme-icon');
-    
-    if (AppState.isDarkMode) {
-        html.classList.add('dark');
-        if (themeIcon) themeIcon.className = 'fas fa-sun';
-    } else {
-        html.classList.remove('dark');
-        if (themeIcon) themeIcon.className = 'fas fa-moon';
-    }
-    
-    localStorage.setItem('jp-ia-theme', AppState.isDarkMode ? 'dark' : 'light');
-}
-
-// ===== HISTORIAL Y PERSISTENCIA =====
-function saveToHistory(userMessage, botResponse) {
-    const timestamp = new Date().toLocaleTimeString('es-PR', {
-        hour: '2-digit',
-        minute: '2-digit'
-    });
-    
-    AppState.chatHistory.push(
-        { sender: 'user', content: userMessage, timestamp },
-        { sender: 'bot', content: botResponse, timestamp }
-    );
-    
-    // Limitar historial a últimos 100 mensajes
-    if (AppState.chatHistory.length > 100) {
-        AppState.chatHistory = AppState.chatHistory.slice(-100);
-    }
-    
-    saveChatHistory();
-}
-
-function saveChatHistory() {
-    try {
-        localStorage.setItem(
-            `chat_history_${AppState.currentSessionId}`, 
-            JSON.stringify(AppState.chatHistory)
-        );
-    } catch (error) {
-        console.warn('Error guardando historial:', error);
-    }
-}
-
-function loadChatHistory() {
-    try {
-        const saved = localStorage.getItem(`chat_history_${AppState.currentSessionId}`);
-        if (saved) {
-            AppState.chatHistory = JSON.parse(saved);
-            
-            // Recrear mensajes en la UI
-            AppState.chatHistory.forEach(msg => {
-                if (msg.sender !== 'welcome') {
-                    addMessage(msg.content, msg.sender, msg.timestamp);
-                }
-            });
-        }
-    } catch (error) {
-        console.warn('Error cargando historial:', error);
-        AppState.chatHistory = [];
-    }
-}
-
-function setupAutoSave() {
-    setInterval(() => {
-        saveChatHistory();
-    }, CONFIG.AUTO_SAVE_INTERVAL);
-}
-
-// ===== FUNCIONES DE UI AVANZADAS =====
-function setupTextareaAutoResize() {
-    const textarea = document.getElementById('message-input');
-    if (!textarea) return;
-    
-    textarea.addEventListener('input', function() {
-        this.style.height = 'auto';
-        const maxHeight = 120;
-        const newHeight = Math.min(this.scrollHeight, maxHeight);
-        this.style.height = newHeight + 'px';
-        
-        // Ajustar scroll del container si es necesario
-        if (this.scrollHeight > maxHeight) {
-            this.style.overflowY = 'auto';
-        } else {
-            this.style.overflowY = 'hidden';
-        }
-    });
-}
-
-function hideLoadingScreen() {
-    const loadingScreen = document.getElementById('loading-screen');
-    if (loadingScreen) {
-        setTimeout(() => {
-            loadingScreen.style.opacity = '0';
-            setTimeout(() => {
-                loadingScreen.style.display = 'none';
-            }, 500);
-        }, 1000);
-    }
-}
-
-function toggleMobileMenu() {
+// ===== SIDEBAR MÓVIL =====
+function toggleSidebar() {
     const sidebar = document.getElementById('sidebar');
-    const overlay = document.getElementById('modal-overlay');
+    const overlay = document.getElementById('sidebarOverlay');
     
     if (sidebar && overlay) {
         sidebar.classList.toggle('open');
@@ -794,472 +505,133 @@ function toggleMobileMenu() {
     }
 }
 
-function setupTooltips() {
-    // Implementar tooltips para botones con data-tooltip
-    const elements = document.querySelectorAll('[data-tooltip]');
+function closeSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('sidebarOverlay');
     
-    elements.forEach(element => {
-        element.addEventListener('mouseenter', showTooltip);
-        element.addEventListener('mouseleave', hideTooltip);
-    });
-}
-
-function showTooltip(event) {
-    const element = event.target;
-    const text = element.getAttribute('data-tooltip');
-    
-    if (!text) return;
-    
-    const tooltip = document.createElement('div');
-    tooltip.className = 'tooltip';
-    tooltip.textContent = text;
-    tooltip.id = 'active-tooltip';
-    
-    document.body.appendChild(tooltip);
-    
-    const rect = element.getBoundingClientRect();
-    tooltip.style.left = rect.left + (rect.width / 2) - (tooltip.offsetWidth / 2) + 'px';
-    tooltip.style.top = rect.top - tooltip.offsetHeight - 8 + 'px';
-    
-    requestAnimationFrame(() => {
-        tooltip.style.opacity = '1';
-        tooltip.style.transform = 'translateY(0)';
-    });
-}
-
-function hideTooltip() {
-    const tooltip = document.getElementById('active-tooltip');
-    if (tooltip) {
-        tooltip.remove();
-    }
-}
-
-// ===== SUGERENCIAS INTELIGENTES =====
-function showSuggestions(query) {
-    const suggestions = getSuggestions(query.toLowerCase());
-    const container = document.getElementById('quick-suggestions');
-    
-    if (!container || suggestions.length === 0) {
-        hideSuggestions();
-        return;
-    }
-    
-    container.innerHTML = '';
-    suggestions.forEach(suggestion => {
-        const chip = document.createElement('div');
-        chip.className = 'suggestion-chip';
-        chip.textContent = suggestion.text;
-        chip.onclick = () => enviarConsultaRapida(suggestion.query);
-        container.appendChild(chip);
-    });
-    
-    container.style.display = 'flex';
-}
-
-function hideSuggestions() {
-    const container = document.getElementById('quick-suggestions');
-    if (container) {
-        container.style.display = 'none';
-    }
-}
-
-function getSuggestions(query) {
-    const suggestions = [
-        { keywords: ['permiso', 'permisos'], text: '📋 Tabla de permisos', query: 'tabla de permisos' },
-        { keywords: ['historico', 'histórico', 'conservacion'], text: '🏛️ Sitios históricos', query: 'sitios históricos' },
-        { keywords: ['construccion', 'construcción', 'edificar'], text: '🏗️ Permisos de construcción', query: '¿Qué es un permiso de construcción?' },
-        { keywords: ['tabla', 'formato'], text: '📊 Menú de tablas', query: 'Generar respuesta en formato tabla' },
-        { keywords: ['ayuda', 'help'], text: '❓ Ayuda del sistema', query: 'ayuda' },
-        { keywords: ['documento', 'documentos'], text: '📄 Documentos requeridos', query: '¿Qué documentos necesito para un permiso de construcción?' },
-        { keywords: ['plazo', 'plazos', 'tiempo'], text: '⏱️ Plazos de tramitación', query: 'plazos de tramitación' },
-        { keywords: ['zonificacion', 'zonificación'], text: '🏗️ Requisitos de zonificación', query: 'requisitos zonificación' }
-    ];
-    
-    return suggestions.filter(suggestion => 
-        suggestion.keywords.some(keyword => keyword.includes(query) || query.includes(keyword))
-    ).slice(0, 3);
-}
-
-function showRelatedSuggestions(query) {
-    // Mostrar sugerencias relacionadas después de una consulta
-    setTimeout(() => {
-        const relatedSuggestions = getSuggestions(query.toLowerCase());
-        if (relatedSuggestions.length > 0) {
-            showSuggestions(query);
-        }
-    }, 2000);
-}
-
-// ===== FUNCIONES DE MODAL =====
-function showHelp() {
-    const modal = document.getElementById('help-modal');
-    const overlay = document.getElementById('modal-overlay');
-    
-    if (modal && overlay) {
-        modal.style.display = 'block';
-        overlay.classList.add('active');
-        modal.setAttribute('aria-hidden', 'false');
-        
-        // Focus en el modal para accesibilidad
-        setTimeout(() => {
-            const closeButton = modal.querySelector('.modal-close');
-            if (closeButton) closeButton.focus();
-        }, 100);
-    }
-}
-
-function closeModal(modalId) {
-    const modal = document.getElementById(modalId);
-    const overlay = document.getElementById('modal-overlay');
-    
-    if (modal) {
-        modal.style.display = 'none';
-        modal.setAttribute('aria-hidden', 'true');
-    }
-    
-    if (overlay) {
+    if (sidebar && overlay) {
+        sidebar.classList.remove('open');
         overlay.classList.remove('active');
     }
 }
 
-function closeAllModals() {
-    const modals = document.querySelectorAll('.modal');
-    const overlay = document.getElementById('modal-overlay');
+// ===== SISTEMA DE TOASTS =====
+function showToast(message, type = 'info', duration = 3000) {
+    const toastContainer = document.getElementById('toastContainer');
+    if (!toastContainer) return;
     
-    modals.forEach(modal => {
-        modal.style.display = 'none';
-        modal.setAttribute('aria-hidden', 'true');
+    const toastId = `toast-${Date.now()}`;
+    const toastHtml = `
+        <div class="toast ${type}" id="${toastId}">
+            <div class="toast-content">
+                <span>${escapeHtml(message)}</span>
+                <button class="toast-close" onclick="removeToast('${toastId}')">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+        </div>
+    `;
+    
+    toastContainer.insertAdjacentHTML('beforeend', toastHtml);
+    
+    // Auto-remove después del duration
+    setTimeout(() => removeToast(toastId), duration);
+}
+
+function removeToast(toastId) {
+    const toast = document.getElementById(toastId);
+    if (toast) {
+        toast.style.animation = 'slideOutRight 0.3s ease';
+        setTimeout(() => toast.remove(), 300);
+    }
+}
+
+// ===== UTILIDADES =====
+function generateSessionId() {
+    return 'session-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+}
+
+function formatTime(date) {
+    return date.toLocaleTimeString('es-PR', {
+        hour: '2-digit',
+        minute: '2-digit'
     });
-    
-    if (overlay) {
-        overlay.classList.remove('active');
-    }
 }
 
-// ===== FUNCIONES DE MENSAJE AVANZADAS =====
-function copyMessage(button) {
-    const messageText = button.closest('.message-content').querySelector('.message-text');
-    const text = messageText.textContent || messageText.innerText;
-    
-    navigator.clipboard.writeText(text).then(() => {
-        showToast('Mensaje copiado al portapapeles', 'success');
-        
-        // Efecto visual en el botón
-        const icon = button.querySelector('i');
-        const originalClass = icon.className;
-        icon.className = 'fas fa-check';
-        setTimeout(() => {
-            icon.className = originalClass;
-        }, 1500);
-    }).catch(() => {
-        showToast('Error al copiar el mensaje', 'error');
-    });
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }
 
-function regenerateResponse(button) {
-    const messageElement = button.closest('.message');
-    const previousMessage = messageElement.previousElementSibling;
-    
-    if (previousMessage && previousMessage.classList.contains('user-message')) {
-        const userText = previousMessage.querySelector('.message-text').textContent;
-        
-        // Remover la respuesta actual
-        messageElement.remove();
-        
-        // Regenerar respuesta
-        enviarConsultaRapida(userText);
-        showToast('Regenerando respuesta...', 'info');
-    }
+function formatBotResponse(text) {
+    // Formato básico para respuestas del bot
+    return escapeHtml(text)
+        .replace(/\n/g, '<br>')
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*(.*?)\*/g, '<em>$1</em>')
+        .replace(/\[TOMO ([^\]]+)\]/g, '<span class="citation">TOMO $1</span>');
 }
 
-function handleInternalLink(link) {
-    // Manejar enlaces internos del sistema
-    switch(link) {
-        case 'tabla-permisos':
-            enviarConsultaRapida('tabla de permisos');
-            break;
-        case 'sitios-historicos':
-            enviarConsultaRapida('sitios históricos');
-            break;
-        case 'ayuda':
-            showHelp();
-            break;
-        default:
-            console.log('Enlace no reconocido:', link);
-    }
-}
-
-// ===== MANEJO DE ERRORES =====
-function handleAPIError(error) {
-    console.error('Error de API:', error);
-    
-    let errorMessage = 'Ha ocurrido un error inesperado.';
-    
-    if (error.message.includes('fetch')) {
-        errorMessage = 'Error de conexión. Verifica tu conexión a internet.';
-        updateConnectionStatus(false);
-    } else if (error.message.includes('timeout') || error.message.includes('agotado')) {
-        errorMessage = 'Tiempo de espera agotado. El servidor tardó demasiado en responder.';
-    } else if (error.message.includes('HTTP 5')) {
-        errorMessage = 'Error del servidor. Por favor, intenta nuevamente en unos momentos.';
-    } else if (error.message.includes('HTTP 4')) {
-        errorMessage = 'Error en la solicitud. Verifica que el mensaje sea válido.';
+// ===== ATAJOS DE TECLADO =====
+document.addEventListener('keydown', function(e) {
+    // Ctrl+/ para enfocar input
+    if (e.ctrlKey && e.key === '/') {
+        e.preventDefault();
+        const input = document.getElementById('messageInput');
+        if (input) input.focus();
     }
     
-    addMessage(`⚠️ ${errorMessage}`, 'bot');
-    showToast(errorMessage, 'error');
-}
-
-function handleConnectionChange() {
-    const isOnline = navigator.onLine;
-    updateConnectionStatus(isOnline);
-    
-    if (isOnline) {
-        showToast('Conexión restablecida', 'success');
-    } else {
-        showToast('Sin conexión a internet', 'warning');
+    // Escape para cerrar sidebar en móvil
+    if (e.key === 'Escape') {
+        closeSidebar();
     }
-}
+});
 
-function handleBeforeUnload(event) {
-    if (AppState.isTyping || document.getElementById('message-input').value.trim()) {
-        event.preventDefault();
-        event.returnValue = '¿Estás seguro de que quieres salir? Hay una conversación en progreso.';
-        return event.returnValue;
-    }
-}
+// ===== MANEJO DE ERRORES GLOBALES =====
+window.addEventListener('error', function(e) {
+    console.error('Error global:', e.error);
+    showToast('Error inesperado en la aplicación', 'error');
+});
 
-function handlePaste(event) {
-    // Manejar pegado de contenido (futuro: imágenes, archivos)
-    const clipboardData = event.clipboardData;
-    const items = clipboardData.items;
-    
-    for (let item of items) {
-        if (item.type.indexOf('image') !== -1) {
-            event.preventDefault();
-            showToast('Función de imágenes próximamente disponible', 'info');
-            break;
+// ===== CSS DINÁMICAS ADICIONALES =====
+const additionalStyles = `
+    @keyframes slideOutRight {
+        from {
+            opacity: 1;
+            transform: translateX(0);
+        }
+        to {
+            opacity: 0;
+            transform: translateX(100%);
         }
     }
-}
-
-// ===== FUNCIONES ADICIONALES =====
-function toggleFullscreen() {
-    if (!document.fullscreenElement) {
-        document.documentElement.requestFullscreen().catch(() => {
-            showToast('No se pudo activar pantalla completa', 'error');
-        });
-    } else {
-        document.exitFullscreen();
-    }
-}
-
-function attachFile() {
-    showToast('Función de archivos próximamente disponible', 'info');
-}
-
-function toggleVoiceInput() {
-    showToast('Función de voz próximamente disponible', 'info');
-}
-
-// ===== MANEJO DE ESPECIALISTAS =====
-function seleccionarEspecialista(especialista) {
-    // Actualizar estado global
-    AppState.currentSpecialist = especialista;
     
-    // Actualizar UI de botones
-    document.querySelectorAll('.specialist-button').forEach(btn => {
-        btn.classList.remove('active');
-    });
-    
-    const activeButton = document.querySelector(`[data-specialist="${especialista}"]`);
-    if (activeButton) {
-        activeButton.classList.add('active');
+    .toast-content {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
     }
     
-    // Actualizar header del chat
-    updateChatHeader(especialista);
-    
-    // Limpiar chat para el nuevo especialista
-    iniciarNuevoChat();
-    
-    // Mostrar mensaje inicial del especialista
-    mostrarMensajeInicialEspecialista(especialista);
-}
-
-function updateChatHeader(especialista) {
-    const especialistas = {
-        'general': {
-            name: 'Experto JP_IA',
-            description: 'Análisis Inteligente de Reglamentos de Planificación',
-            icon: 'fas fa-brain',
-            status: 'Sistema Experto Activo'
-        },
-        'procedimientos': {
-            name: 'Especialista en Procedimientos',
-            description: 'Procesos administrativos y trámites',
-            icon: 'fas fa-clipboard-list',
-            status: 'Especialista en Procedimientos Activo'
-        },
-        'tecnico-grafico': {
-            name: 'Especialista Técnico Gráfico',
-            description: 'Planos, mapas y documentos técnicos',
-            icon: 'fas fa-drafting-compass',
-            status: 'Especialista Técnico Gráfico Activo'
-        },
-        'edificabilidad': {
-            name: 'Especialista en Edificabilidad',
-            description: 'Construcción y densidad urbana',
-            icon: 'fas fa-building',
-            status: 'Especialista en Edificabilidad Activo'
-        },
-        'zonificacion': {
-            name: 'Especialista en Zonificación',
-            description: 'Clasificación y uso del suelo',
-            icon: 'fas fa-map-marked-alt',
-            status: 'Especialista en Zonificación Activo'
-        },
-        'ambiental-infraestructura': {
-            name: 'Especialista Ambiental',
-            description: 'Impacto ambiental e infraestructura',
-            icon: 'fas fa-leaf',
-            status: 'Especialista Ambiental Activo'
-        },
-        'historico': {
-            name: 'Especialista Histórico',
-            description: 'Conservación histórica y cultural',
-            icon: 'fas fa-landmark',
-            status: 'Especialista Histórico Activo'
-        }
-    };
-    
-    const info = especialistas[especialista] || especialistas['general'];
-    
-    // Actualizar elementos del header
-    const titleElement = document.getElementById('specialist-title');
-    const nameElement = document.getElementById('specialist-name');
-    const descElement = document.getElementById('specialist-description');
-    const statusElement = document.getElementById('specialist-status');
-    
-    if (titleElement && nameElement) {
-        titleElement.innerHTML = `<i class="${info.icon}"></i> <span id="specialist-name">${info.name}</span>`;
-    }
-    if (descElement) {
-        descElement.textContent = info.description;
-    }
-    if (statusElement) {
-        statusElement.textContent = info.status;
-    }
-}
-
-function mostrarMensajeInicialEspecialista(especialista) {
-    const mensajes = {
-        'general': {
-            mensaje: `¡Hola! Soy tu experto en planificación de Puerto Rico. 🎓 Tengo acceso completo a todos los reglamentos y puedo analizar cualquier consulta para darte respuestas precisas y detalladas.`,
-            ejemplos: [
-                "¿Qué permisos necesito para construir una casa?",
-                "Explícame el proceso de zonificación",
-                "¿Cuáles son las regulaciones para sitios históricos?",
-                "¿Qué agencias están involucradas en X proceso?"
-            ]
-        },
-        'procedimientos': {
-            mensaje: `¡Hola! Soy tu especialista en **Procedimientos Administrativos**. 📋 Me enfoco específicamente en procesos, trámites y procedimientos de la Junta de Planificación.`,
-            ejemplos: [
-                "¿Cuál es el proceso para obtener un permiso de construcción?",
-                "¿Qué documentos necesito para solicitar una consulta de ubicación?",
-                "¿Cuáles son los pasos para obtener una endorsación?",
-                "¿Cómo se tramita una solicitud de variación?"
-            ]
-        },
-        'tecnico-grafico': {
-            mensaje: `¡Hola! Soy tu especialista **Técnico Gráfico**. 📐 Me especializo en planos, mapas, documentos técnicos y aspectos gráficos de la planificación.`,
-            ejemplos: [
-                "¿Qué requisitos tienen los planos de construcción?",
-                "¿Cómo debo presentar los mapas de ubicación?",
-                "¿Qué especificaciones técnicas necesitan los documentos?",
-                "¿Cuáles son los estándares para dibujos técnicos?"
-            ]
-        },
-        'edificabilidad': {
-            mensaje: `¡Hola! Soy tu especialista en **Edificabilidad**. 🏗️ Me enfoco en construcción, densidad urbana y aspectos de edificación.`,
-            ejemplos: [
-                "¿Cuál es la densidad máxima permitida en mi zona?",
-                "¿Qué restricciones de altura tienen los edificios?",
-                "¿Cómo se calcula el factor de edificabilidad?",
-                "¿Qué es el coeficiente de ocupación del lote?"
-            ]
-        },
-        'zonificacion': {
-            mensaje: `¡Hola! Soy tu especialista en **Zonificación**. 🗺️ Me especializo en clasificación y uso del suelo, zonificación urbana y rural.`,
-            ejemplos: [
-                "¿Qué usos están permitidos en mi zona?",
-                "¿Cómo se clasifican las zonas urbanas?",
-                "¿Qué es una zona de desarrollo planificado?",
-                "¿Cuáles son las restricciones por zonificación?"
-            ]
-        },
-        'ambiental-infraestructura': {
-            mensaje: `¡Hola! Soy tu especialista **Ambiental**. 🌿 Me enfoco en impacto ambiental, infraestructura y sostenibilidad.`,
-            ejemplos: [
-                "¿Qué estudios ambientales necesito para mi proyecto?",
-                "¿Cuáles son los requisitos de infraestructura?",
-                "¿Cómo evalúo el impacto ambiental?",
-                "¿Qué regulaciones ambientales aplican?"
-            ]
-        },
-        'historico': {
-            mensaje: `¡Hola! Soy tu especialista en **Conservación Histórica**. 🏛️ Me especializo en sitios históricos, patrimonio cultural y conservación.`,
-            ejemplos: [
-                "¿Cómo designo un sitio como histórico?",
-                "¿Qué restricciones tienen los edificios históricos?",
-                "¿Cuál es el proceso de conservación histórica?",
-                "¿Qué incentivos existen para la conservación?"
-            ]
-        }
-    };
-    
-    const info = mensajes[especialista] || mensajes['general'];
-    
-    // Crear mensaje con ejemplos
-    let mensajeCompleto = info.mensaje;
-    
-    if (info.ejemplos && info.ejemplos.length > 0) {
-        mensajeCompleto += `\n\n**Pregúntame sobre:**\n`;
-        info.ejemplos.forEach(ejemplo => {
-            mensajeCompleto += `• ${ejemplo}\n`;
-        });
+    .toast-close {
+        background: none;
+        border: none;
+        cursor: pointer;
+        opacity: 0.7;
+        padding: 4px;
+        border-radius: 4px;
     }
     
-    mensajeCompleto += `\n¡Pregúntame lo que necesites sobre mi área de especialización!`;
-    
-    // Agregar mensaje al chat
-    addMessage(mensajeCompleto, 'bot');
-}
+    .toast-close:hover {
+        opacity: 1;
+        background: rgba(0,0,0,0.1);
+    }
+`;
 
-// ===== INICIALIZACIÓN GLOBAL =====
-// Configurar variables globales para compatibilidad
-window.AppState = AppState;
-window.CONFIG = CONFIG;
-window.enviarMensaje = handleSendMessage;
-window.enviarConsultaRapida = enviarConsultaRapida;
-window.iniciarNuevoChat = iniciarNuevoChat;
-window.clearChat = clearChat;
-window.exportChat = exportChat;
-window.showHelp = showHelp;
-window.toggleTheme = toggleTheme;
-window.copyMessage = copyMessage;
-window.regenerateResponse = regenerateResponse;
-window.handleInternalLink = handleInternalLink;
-window.closeModal = closeModal;
-window.closeAllModals = closeAllModals;
-window.toggleMobileMenu = toggleMobileMenu;
-window.toggleFullscreen = toggleFullscreen;
-window.attachFile = attachFile;
-window.toggleVoiceInput = toggleVoiceInput;
-window.seleccionarEspecialista = seleccionarEspecialista; // Nueva función
+// Agregar estilos adicionales
+const styleSheet = document.createElement('style');
+styleSheet.textContent = additionalStyles;
+document.head.appendChild(styleSheet);
 
-// Debug info
-console.log('🔧 JP_IA JavaScript cargado correctamente');
-console.log('📊 Estado de la aplicación disponible en window.AppState');
-console.log('⚙️ Configuración disponible en window.CONFIG');
+console.log('✅ JP_IA v4.0 - Sistema de Chat Moderno cargado completamente');
