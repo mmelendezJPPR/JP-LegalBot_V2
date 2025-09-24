@@ -99,7 +99,74 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[logging.StreamHandler(sys.stdout)]
 )
+
+# Función de inicialización de base de datos
+def inicializar_base_datos():
+    """Inicializa la base de datos SQLite si no existe"""
+    from pathlib import Path
+    
+    # Crear directorio database si no existe
+    db_dir = Path('database')
+    db_dir.mkdir(exist_ok=True)
+    
+    # Ruta de la base de datos principal
+    db_path = db_dir / 'conversaciones.db'
+    
+    try:
+        # Conectar a la base de datos (se crea si no existe)
+        conn = sqlite3.connect(str(db_path))
+        cursor = conn.cursor()
+        
+        # Crear tabla de conversaciones
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS conversaciones (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                usuario TEXT,
+                consulta TEXT NOT NULL,
+                respuesta TEXT NOT NULL,
+                sistema_usado TEXT,
+                confianza REAL,
+                tiempo_procesamiento REAL,
+                ip_usuario TEXT,
+                user_agent TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # Crear tabla de métricas de rendimiento
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS metricas_rendimiento (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                consulta_length INTEGER,
+                respuesta_length INTEGER,
+                sistema_usado TEXT,
+                confianza REAL,
+                tiempo_procesamiento REAL,
+                ip TEXT,
+                user_agent TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # Crear índices para mejor rendimiento
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_conversaciones_timestamp ON conversaciones(timestamp)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_conversaciones_usuario ON conversaciones(usuario)")
+        
+        conn.commit()
+        conn.close()
+        
+        print(f"✅ Base de datos inicializada: {db_path}")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Error inicializando base de datos: {e}")
+        return False
 logger = logging.getLogger(__name__)
+
+# Inicializar base de datos al arrancar la aplicación
+inicializar_base_datos()
 
 # Cargar configuración después del logger
 if PROMPTS_DISPONIBLES:
@@ -1677,6 +1744,15 @@ def api_test():
         }), 500
 
 # ===== MANEJO DE ARCHIVOS ESTÁTICOS OPTIMIZADO =====
+
+@app.route('/favicon.ico')
+def favicon():
+    """Servir favicon desde la carpeta static"""
+    try:
+        return send_from_directory(app.static_folder, 'favicon.ico', mimetype='image/vnd.microsoft.icon')
+    except Exception as e:
+        logger.warning(f"⚠️ Error sirviendo favicon: {e}")
+        return "", 404
 
 @app.route('/static/<path:filename>')
 def static_files(filename):
