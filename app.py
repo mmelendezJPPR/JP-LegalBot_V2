@@ -876,6 +876,22 @@ except Exception as e:
 # Inicializar sistema de IA reorganizado si está disponible
 if SISTEMA_AI_DISPONIBLE:
     try:
+        logger.info("🔧 Verificando configuración Azure OpenAI antes de inicializar sistema avanzado...")
+        
+        # Verificar que las variables de entorno estén configuradas
+        azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+        azure_key = os.getenv("AZURE_OPENAI_KEY") 
+        
+        if not azure_endpoint or not azure_endpoint.startswith('http'):
+            raise ValueError(f"AZURE_OPENAI_ENDPOINT no válido: '{azure_endpoint}'. Configure las variables de entorno en Render.")
+            
+        if not azure_key or len(azure_key) < 10:
+            raise ValueError(f"AZURE_OPENAI_KEY no válido (longitud: {len(azure_key)}). Configure las variables de entorno en Render.")
+        
+        logger.info(f"✅ Variables Azure OpenAI verificadas:")
+        logger.info(f"   📡 Endpoint: {azure_endpoint}")
+        logger.info(f"   🔑 API Key: ***{azure_key[-8:]}")
+        
         # Inicializar el retriever y answer engine
         retriever = HybridRetriever()
         answer_engine = AnswerEngine(retriever)
@@ -981,6 +997,14 @@ INSTRUCCIONES: Mantén coherencia con el historial previo. Si el usuario hace re
     except Exception as e:
         logger.error(f"❌ Error inicializando sistema de IA reorganizado: {e}")
         logger.error(f"📝 Traceback: {traceback.format_exc()}")
+        
+        # Mensaje específico para problemas de configuración
+        if "AZURE_OPENAI_ENDPOINT" in str(e) or "httpx.UnsupportedProtocol" in str(e):
+            logger.error("🔧 SOLUCIÓN: Configure las variables de entorno Azure OpenAI en el panel de Render:")
+            logger.error("   - AZURE_OPENAI_ENDPOINT=https://legalbotfoundry.cognitiveservices.azure.com/")
+            logger.error("   - AZURE_OPENAI_KEY=[su_clave_azure]")
+            logger.error("   - AZURE_OPENAI_DEPLOYMENT_NAME=gpt-4.1")
+            logger.error("   Después, redeploy el servicio manualmente.")
 
 # Configuraciones del sistema
 CONFIG = {

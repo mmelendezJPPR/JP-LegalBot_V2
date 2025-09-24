@@ -10,6 +10,20 @@ from .retrieve import HybridRetriever
 class AnswerEngine:
     def __init__(self, retriever: HybridRetriever):
         self.retriever = retriever
+        
+        # Validar configuración antes de crear cliente
+        if not AZURE_OPENAI_ENDPOINT or not AZURE_OPENAI_ENDPOINT.startswith('http'):
+            raise ValueError(f"AZURE_OPENAI_ENDPOINT inválido: '{AZURE_OPENAI_ENDPOINT}'. Debe comenzar con https://")
+            
+        if not AZURE_OPENAI_KEY or len(AZURE_OPENAI_KEY) < 10:
+            raise ValueError(f"AZURE_OPENAI_KEY inválido o faltante (longitud: {len(AZURE_OPENAI_KEY)})")
+        
+        print(f"🔧 Configurando cliente Azure OpenAI:")
+        print(f"   📡 Endpoint: {AZURE_OPENAI_ENDPOINT}")
+        print(f"   🔑 API Key: {'*' * (len(AZURE_OPENAI_KEY) - 8) + AZURE_OPENAI_KEY[-8:]}")
+        print(f"   🚀 Deployment: {AZURE_OPENAI_DEPLOYMENT_NAME}")
+        print(f"   📅 API Version: {AZURE_OPENAI_API_VERSION}")
+        
         self.client = AzureOpenAI(
             api_key=AZURE_OPENAI_KEY,
             api_version=AZURE_OPENAI_API_VERSION,

@@ -9,6 +9,17 @@ from .db import get_conn, fts_search
 
 class HybridRetriever:
     def __init__(self, db_path=DB_PATH, faiss_path=FAISS_PATH):
+        # Validar configuración Azure OpenAI antes de crear cliente
+        if not AZURE_OPENAI_ENDPOINT or not AZURE_OPENAI_ENDPOINT.startswith('http'):
+            raise ValueError(f"AZURE_OPENAI_ENDPOINT inválido: '{AZURE_OPENAI_ENDPOINT}'. Debe comenzar con https://")
+            
+        if not AZURE_OPENAI_KEY or len(AZURE_OPENAI_KEY) < 10:
+            raise ValueError(f"AZURE_OPENAI_KEY inválido o faltante (longitud: {len(AZURE_OPENAI_KEY)})")
+        
+        print(f"🔧 Configurando HybridRetriever Azure OpenAI:")
+        print(f"   📡 Endpoint: {AZURE_OPENAI_ENDPOINT}")
+        print(f"   🔑 API Key: {'*' * max(0, len(AZURE_OPENAI_KEY) - 8) + AZURE_OPENAI_KEY[-8:]}")
+        
         # Configurar Azure OpenAI para chat
         self.azure_client = AzureOpenAI(
             api_key=AZURE_OPENAI_KEY,
