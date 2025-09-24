@@ -81,13 +81,17 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as ThreadTimeoutError
 import sqlite3
 import uuid
+from datetime import datetime
 
-# Importar el sistema de prompts profesional
+# Importar el sistema de prompts profesional desde la nueva estructura
 try:
-    from embedding_db.prompts import SYSTEM_RAG, USER_TEMPLATE
+    from ai_system.prompts import SYSTEM_RAG, USER_TEMPLATE
     PROMPTS_DISPONIBLES = True
 except ImportError as e:
     PROMPTS_DISPONIBLES = False
+
+# Importar el nuevo sistema de IA reorganizado (se hace después del logger)
+SISTEMA_AI_DISPONIBLE = False
 
 # Configurar logging optimizado para Render
 logging.basicConfig(
@@ -99,9 +103,21 @@ logger = logging.getLogger(__name__)
 
 # Cargar configuración después del logger
 if PROMPTS_DISPONIBLES:
-    logger.info("✅ Sistema de prompts profesional cargado desde embedding_db/prompts.py")
+    logger.info("✅ Sistema de prompts profesional cargado desde ai_system/prompts.py")
 else:
     logger.warning("⚠️ No se pudo cargar sistema de prompts, usando prompts básicos")
+
+# Importar el nuevo sistema de IA reorganizado
+try:
+    from ai_system.retrieve import HybridRetriever
+    from ai_system.answer import AnswerEngine
+    from ai_system.db import get_conn, fts_search
+    SISTEMA_AI_DISPONIBLE = True
+    logger.info("✅ Sistema de IA reorganizado importado correctamente")
+except ImportError as e:
+    SISTEMA_AI_DISPONIBLE = False
+    logger.warning(f"⚠️ No se pudo importar sistema de IA: {e}")
+    logger.error(f"📝 Traceback: {traceback.format_exc()}")
 
 # Cargar variables de entorno
 load_dotenv()
@@ -112,9 +128,13 @@ def validar_variables_entorno():
     errores = []
     warnings = []
     
-    api_key = os.getenv('OPENAI_API_KEY')
-    if not api_key or len(api_key.strip()) < 20:
-        warnings.append("OPENAI_API_KEY faltante o corto - Sistema funcionará con fallbacks")
+    # Verificar Azure OpenAI en lugar de OpenAI personal
+    azure_key = os.getenv('AZURE_OPENAI_KEY')
+    azure_endpoint = os.getenv('AZURE_OPENAI_ENDPOINT')
+    if not azure_key or len(azure_key.strip()) < 20:
+        warnings.append("AZURE_OPENAI_KEY faltante o corto - Sistema funcionará limitado")
+    if not azure_endpoint or not azure_endpoint.startswith('https://'):
+        warnings.append("AZURE_OPENAI_ENDPOINT faltante o inválido")
     
     secret_key = os.getenv('SECRET_KEY')
     if not secret_key or len(secret_key) < 16:
@@ -193,13 +213,13 @@ def add_security_headers(response):
     
     return response
 
-# Handler para shutdown graceful en Render
-def signal_handler(signum, frame):
-    logger.info("🛑 Recibida señal de shutdown, cerrando aplicación...")
-    sys.exit(0)
+# Handler para shutdown graceful en Render - DESHABILITADO PARA DESARROLLO LOCAL
+# def signal_handler(signum, frame):
+#     logger.info("🛑 Recibida señal de shutdown, cerrando aplicación...")
+#     sys.exit(0)
 
-signal.signal(signal.SIGTERM, signal_handler)
-signal.signal(signal.SIGINT, signal_handler)
+# signal.signal(signal.SIGTERM, signal_handler)  # COMENTADO - problemático en desarrollo
+# signal.signal(signal.SIGINT, signal_handler)   # COMENTADO - problemático en desarrollo
 
 # Cliente OpenAI con manejo de errores (Azure y estándar)
 deployment_name = "gpt-4.1"  # Variable global para deployment
@@ -223,23 +243,62 @@ try:
         logger.info(f"   📡 Endpoint: {azure_endpoint}")
         logger.info(f"   🚀 Deployment: {deployment_name}")
     else:
-        # Fallback a OpenAI estándar
-        api_key = os.getenv("OPENAI_API_KEY")
-        if api_key and api_key.strip():
-            client = openai.OpenAI(api_key=api_key, timeout=OPENAI_TIMEOUT)
-            deployment_name = "gpt-4o"  # Modelo para OpenAI estándar
-            logger.info("✅ Cliente OpenAI estándar configurado correctamente")
-        else:
-            logger.warning("⚠️ No hay API key configurada (ni Azure ni OpenAI)")
-            client = None
+        # Error: Sin configuración Azure OpenAI válida
+        logger.error("❌ Configuración Azure OpenAI faltante o incompleta")
+        client = None
+        deployment_name = "gpt-4.1"  # Mantener valor por defecto
 except Exception as e:
     logger.error(f"❌ Error configurando cliente OpenAI: {e}")
     client = None
 
+# ===== SQLITE SIMPLE PARA CONVERSACIONES =====
+def init_simple_database():
+    """Inicializar base de datos simple de conversaciones"""
+    try:
+        conn = sqlite3.connect('conversaciones.db')
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS conversaciones (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                usuario TEXT,
+                pregunta TEXT,
+                respuesta TEXT,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        conn.commit()
+        conn.close()
+        logger.info("✅ Base de datos SQLite simple inicializada")
+        return True
+    except Exception as e:
+        logger.error(f"❌ Error inicializando base de datos simple: {e}")
+        return False
+
+def guardar_conversacion_simple(usuario, pregunta, respuesta):
+    """Guardar conversación en SQLite simple"""
+    try:
+        conn = sqlite3.connect('conversaciones.db')
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            INSERT INTO conversaciones (usuario, pregunta, respuesta)
+            VALUES (?, ?, ?)
+        ''', (usuario, pregunta, respuesta))
+        
+        conn.commit()
+        conn.close()
+        logger.info(f"💾 Conversación guardada para usuario: {usuario}")
+        return True
+    except Exception as e:
+        logger.error(f"❌ Error guardando conversación: {e}")
+        return False
+
 # ===== SISTEMA DE APRENDIZAJE AUTOMÁTICO =====
 def get_learning_db_connection():
     """Obtener conexión a la base de datos de aprendizaje"""
-    db_path = "embedding_db/hybrid_knowledge.db"
+    db_path = "database/hybrid_knowledge.db"
     try:
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row  # Para acceso por nombre de columna
@@ -333,8 +392,8 @@ def get_or_create_conversation_id(session):
 
 # Importar el sistema de autenticación simple
 try:
-    from simple_auth import login_user, is_logged_in, login_required, simple_auth
-    logger.info("[OK] Sistema de autenticacion importado")
+    from core.auth import login_user, is_logged_in, login_required, simple_auth
+    logger.info("[OK] Sistema de autenticacion importado desde core/auth.py")
     auth_disponible = True
     logger.info(f"🔍 DEBUG: auth_disponible = {auth_disponible}")
 except ImportError as e:
@@ -476,6 +535,62 @@ try:
             # En caso de error, devolver respuesta original
             return respuesta
     
+    # ✅ NUEVA FUNCIÓN SIMPLE CON AZURE OPENAI DIRECTO
+    def procesar_consulta_simple(consulta: str) -> Dict:
+        """Función simple que usa directamente Azure OpenAI - FUNCIONA GARANTIZADO"""
+        try:
+            if not client:
+                return {
+                    'respuesta': 'Error: Cliente Azure OpenAI no configurado',
+                    'fuente': 'error',
+                    'metodos_utilizados': [],
+                    'tiempo_total': 0,
+                    'timestamp': datetime.now().isoformat()
+                }
+            
+            # Prompt simple y directo
+            system_prompt = """Eres JP LegalBot, un asistente especializado en normativas y reglamentos de la Junta de Planificación de Puerto Rico.
+
+Responde de forma clara, precisa y profesional. Si no tienes información específica sobre el tema, indica que necesitas más contexto o que el usuario consulte con el personal de la JP.
+
+Mantén un tono profesional pero amigable."""
+            
+            logger.info(f"🔄 [SIMPLE] Enviando consulta a Azure OpenAI: {consulta[:50]}...")
+            
+            # Llamada directa a Azure OpenAI
+            response = client.chat.completions.create(
+                model=deployment_name,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": consulta}
+                ],
+                max_tokens=1000,
+                temperature=0.3,
+                timeout=45
+            )
+            
+            respuesta = response.choices[0].message.content.strip()
+            logger.info(f"✅ [SIMPLE] Respuesta recibida exitosamente")
+            
+            return {
+                'respuesta': respuesta,
+                'fuente': 'azure_openai_directo',
+                'metodos_utilizados': ['azure_openai'],
+                'tiempo_total': 0.1,
+                'timestamp': datetime.now().isoformat(),
+                'deployment': deployment_name
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ [SIMPLE] Error: {e}")
+            return {
+                'respuesta': f'⚠️ Error técnico: {str(e)[:100]}... Por favor intenta nuevamente.',
+                'fuente': 'error_azure',
+                'metodos_utilizados': [],
+                'tiempo_total': 0,
+                'timestamp': datetime.now().isoformat()
+            }
+
     # Función de procesamiento con sistema simplificado
     def procesar_consulta_hibrida(consulta: str) -> Dict:
         try:
@@ -616,7 +731,7 @@ CONSULTA: {consulta}"""
                     if not context or context.startswith("No se encontró") or context.startswith("Error"):
                         bot_response = (
                             "Puedo buscar en mis documentos internos pero no puedo generar una respuesta refinada porque no hay un servicio de LLM configurado. "
-                            "Por favor configure OPENAI_API_KEY o las variables de Azure OpenAI para obtener respuestas completas."
+                            "Por favor configure correctamente las variables de Azure OpenAI (AZURE_OPENAI_KEY, AZURE_OPENAI_ENDPOINT) para obtener respuestas completas."
                         )
                         return {
                             'respuesta': bot_response,
@@ -675,7 +790,7 @@ CONSULTA: {consulta}"""
             }
     
 except Exception as e:
-    logger.error(f"❌ Error cargando Sistema Híbrido Avanzado: {e}")
+    logger.error(f"❌ Error cargando Sistema Híbrido Simplificado: {e}")
     logger.error(f"📝 Traceback: {traceback.format_exc()}")
     sistema_hibrido_avanzado = None
     sistema_hibrido_disponible = False
@@ -690,6 +805,115 @@ except Exception as e:
             'citas': [],
             'contexto_chars': 0
         }
+
+# Inicializar sistema de IA reorganizado si está disponible
+if SISTEMA_AI_DISPONIBLE:
+    try:
+        # Inicializar el retriever y answer engine
+        retriever = HybridRetriever()
+        answer_engine = AnswerEngine(retriever)
+        logger.info("✅ Sistema de IA reorganizado inicializado correctamente")
+        
+        # Sobrescribir la función con el nuevo sistema
+        def procesar_consulta_hibrida_nueva(consulta: str) -> Dict:
+            try:
+                logger.info(f"🔍 Procesando con AI system: '{consulta[:50]}...'")
+                
+                # 🧠 OBTENER HISTORIAL CONVERSACIONAL PARA MEMORIA
+                def obtener_historial_conversacional(limite=6):
+                    """Obtener últimos mensajes de la conversación actual"""
+                    try:
+                        conn = get_learning_db_connection()
+                        if not conn:
+                            return ""
+                        
+                        cursor = conn.cursor()
+                        # Obtener conversación actual (más reciente)
+                        cursor.execute("SELECT id FROM conversations ORDER BY started_at DESC LIMIT 1")
+                        conv = cursor.fetchone()
+                        
+                        if not conv:
+                            return ""
+                        
+                        # Obtener últimos mensajes de esta conversación
+                        cursor.execute("""
+                            SELECT role, content 
+                            FROM conversation_messages 
+                            WHERE conversation_id = ?
+                            ORDER BY created_at DESC 
+                            LIMIT ?
+                        """, (conv[0], limite))
+                        
+                        mensajes = cursor.fetchall()
+                        conn.close()
+                        
+                        if not mensajes:
+                            return ""
+                        
+                        # Formatear historial (orden cronológico)
+                        historial = []
+                        for role, content in reversed(mensajes):
+                            if role == 'user':
+                                historial.append(f"Usuario: {content}")
+                            else:
+                                # Resumir respuesta del asistente
+                                resumen = content[:150] + "..." if len(content) > 150 else content
+                                historial.append(f"Asistente: {resumen}")
+                        
+                        return "\n".join(historial[-4:])  # Últimos 4 intercambios
+                        
+                    except Exception as e:
+                        logger.error(f"Error obteniendo historial: {e}")
+                        return ""
+                
+                historial = obtener_historial_conversacional()
+                
+                # 📝 CONSTRUIR CONSULTA CON CONTEXTO
+                if historial:
+                    consulta_con_contexto = f"""HISTORIAL DE CONVERSACIÓN PREVIA:
+{historial}
+
+NUEVA CONSULTA DEL USUARIO:
+{consulta}
+
+INSTRUCCIONES: Mantén coherencia con el historial previo. Si el usuario hace referencia a información anterior, conéctala apropiadamente."""
+                    logger.info(f"🧠 Usando historial conversacional: {len(historial)} chars")
+                else:
+                    consulta_con_contexto = consulta
+                    logger.info("📝 Sin historial previo, consulta nueva")
+                
+                # Usar el nuevo sistema de IA CON CONTEXTO
+                resultado = answer_engine.answer(consulta_con_contexto, k=6)
+                logger.info(f"✅ Answer engine respondió: {type(resultado)} - keys: {resultado.keys() if isinstance(resultado, dict) else 'N/A'}")
+                
+                respuesta_final = {
+                    'respuesta': resultado.get('text', ''),  # CORREGIDO: 'text' no 'response'
+                    'sistema_usado': 'ai_system_reorganizado',
+                    'confianza': 0.9,
+                    'citas': resultado.get('citations', []),  # CORREGIDO: 'citations' no 'sources'
+                    'contexto_chars': len(resultado.get('text', ''))  # CORREGIDO: usar 'text'
+                }
+                logger.info(f"✅ Respuesta final construida: respuesta_len={len(respuesta_final['respuesta'])}, citas={len(respuesta_final['citas'])}")
+                return respuesta_final
+                
+            except Exception as e:
+                logger.error(f"❌ Error en sistema de IA reorganizado: {e}")
+                logger.error(f"📝 Traceback completo: {traceback.format_exc()}")
+                return {
+                    'respuesta': f"Error en sistema de IA: {str(e)}",
+                    'sistema_usado': 'error_ai_reorganizado',
+                    'confianza': 0.1,
+                    'citas': [],
+                    'contexto_chars': 0
+                }
+        
+        # Reemplazar la función principal
+        procesar_consulta_hibrida = procesar_consulta_hibrida_nueva
+        logger.info("✅ Función de procesamiento actualizada al nuevo sistema de IA")
+        
+    except Exception as e:
+        logger.error(f"❌ Error inicializando sistema de IA reorganizado: {e}")
+        logger.error(f"📝 Traceback: {traceback.format_exc()}")
 
 # Configuraciones del sistema
 CONFIG = {
@@ -779,8 +1003,10 @@ def get_client_ip():
 
 # ===== PROCESAMIENTO CON TIMEOUT ROBUSTO =====
 def procesar_con_timeout(mensaje, timeout_segundos=REQUEST_TIMEOUT):
-    """Procesar consulta con timeout usando threading"""
+    """Procesar consulta con timeout usando threading - VERSIÓN HÍBRIDA CON DOCUMENTOS JP"""
     try:
+        # ✅ USAR FUNCIÓN HÍBRIDA QUE CONSULTA DOCUMENTOS DE LA JP
+        logger.info("🔄 Usando procesamiento HÍBRIDO con documentos de la JP")
         with ThreadPoolExecutor(max_workers=1) as executor:
             future = executor.submit(procesar_consulta_hibrida, mensaje)
             resultado = future.result(timeout=timeout_segundos)
@@ -788,8 +1014,13 @@ def procesar_con_timeout(mensaje, timeout_segundos=REQUEST_TIMEOUT):
     except ThreadTimeoutError:
         raise TimeoutError(f"Timeout después de {timeout_segundos} segundos")
     except Exception as e:
-        logger.error(f"❌ Error en procesar_con_timeout: {e}")
-        raise e
+        logger.error(f"❌ Error en procesar_con_timeout híbrido: {e}")
+        # Fallback a simple si falla híbrido
+        try:
+            logger.info("🔄 Fallback a procesamiento simple...")
+            return procesar_consulta_simple(mensaje)
+        except:
+            raise e
 
 
 def build_clean_response(resultado: Dict, tiempo_total: float) -> Dict:
@@ -831,6 +1062,8 @@ def build_clean_response(resultado: Dict, tiempo_total: float) -> Dict:
             'timestamp': datetime.now().isoformat(),
             'summary': summary,
             'detail': respuesta,
+            'response': respuesta,  # ✅ AGREGAR PARA COMPATIBILIDAD CON FRONTEND
+            'sources': citas or [],  # ✅ CAMBIAR DE references a sources
             'references': citas or [],
             'metrics': {
                 'sistema_usado': sistema,
@@ -845,11 +1078,14 @@ def build_clean_response(resultado: Dict, tiempo_total: float) -> Dict:
     except Exception as e:
         logger.error(f"❌ Error construyendo respuesta limpia: {e}")
         # Fallback mínimo
+        respuesta_fallback = resultado.get('respuesta') if isinstance(resultado, Dict) else str(resultado)
         return {
             'version': version_sistema,
             'timestamp': datetime.now().isoformat(),
             'summary': '',
-            'detail': resultado.get('respuesta') if isinstance(resultado, Dict) else str(resultado),
+            'detail': respuesta_fallback,
+            'response': respuesta_fallback,  # ✅ AGREGAR PARA COMPATIBILIDAD
+            'sources': [],  # ✅ AGREGAR sources
             'references': [],
             'metrics': {
                 'sistema_usado': resultado.get('sistema_usado', 'desconocido') if isinstance(resultado, Dict) else 'desconocido',
@@ -984,6 +1220,10 @@ def chat():
         confianza = resultado.get('confianza', 0.0)
 
         logger.info(f"✅ Consulta procesada en {tiempo_total:.2f}s - Sistema: {sistema_usado} - Confianza: {confianza}")
+
+        # ✅ GUARDAR CONVERSACIÓN EN SQLITE SIMPLE
+        usuario = session.get('user_id', 'anonimo') if auth_disponible else 'test_user'
+        guardar_conversacion_simple(usuario, mensaje, resultado['respuesta'])
 
         # Log para analytics
         log_consulta(mensaje, resultado['respuesta'], {
@@ -1491,6 +1731,9 @@ def rate_limit_error(error):
 # ===== STARTUP OPTIMIZADO =====
 
 if __name__ == '__main__':
+    # ✅ INICIALIZAR BASE DE DATOS SIMPLE
+    init_simple_database()
+    
     print("\n" + "="*70)
     print("🤖 INICIANDO JP_IA v3.2 - VERSIÓN CORREGIDA PARA RENDER")
     print("🧠 Sistema de IA con análisis de datos regulatorios")
