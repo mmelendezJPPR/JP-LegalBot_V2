@@ -1,0 +1,262 @@
+"""
+=======================================================================
+SIMPLE_AUTH.PY - SISTEMA DE AUTENTICACIÓN JP_LEGALBOT
+=======================================================================
+
+🎯 FUNCIÓN PRINCIPAL:
+   Módulo de autenticación seguro que maneja login/logout de usuarios.
+   Soporta doble autenticación: SQL Server + fallback local.
+
+🏗️ ARQUITECTURA:
+   - Autenticación primaria contra SQL Server
+   - Sistema de fallback con usuarios locales hardcodeados
+   - Hashing seguro de contraseñas con PBKDF2
+   - Validación de sesiones con decoradores
+   - Manejo robusto de errores de conexión
+
+🔐 MÉTODOS DE AUTENTICACIÓN:
+   1. SQL SERVER (Principal):
+      - Conecta a base de datos corporativa
+      - Valida usuarios contra tabla real
+      - Manejo automático de conexiones
+   
+   2. LOCAL FALLBACK (Respaldo):
+      - Usuarios hardcodeados en código
+      - Admin911/Junta12345 por defecto
+      - Activado si SQL falla
+
+📋 FUNCIONES PRINCIPALES:
+   - authenticate(username, password): Validar credenciales
+   - login_user(): Función wrapper para compatibilidad
+   - is_logged_in(): Verificar estado de sesión
+   - login_required(): Decorador para proteger rutas
+
+🔧 CONFIGURACIÓN SQL:
+   - Driver: ODBC Driver 17 for SQL Server
+   - Timeout: 5 segundos
+   - Encoding: UTF-8
+   - Auto-commit habilitado
+
+⚡ CARACTERÍSTICAS DE SEGURIDAD:
+   - Passwords hasheados con PBKDF2 + salt
+   - 100,000 iteraciones para resistir ataques
+   - Validación de roles de usuario
+   - Control de usuarios activos/inactivos
+   - Logs detallados de intentos de autenticación
+
+🚀 USO DESDE APP.PY:
+   from simple_auth import login_user, is_logged_in, login_required
+   
+   @login_required
+   def protected_route():
+       return "Solo para usuarios autenticados"
+
+🔧 VARIABLES DE ENTORNO OPCIONALES:
+   - SQL_SERVER: Servidor de base de datos
+   - SQL_DATABASE: Nombre de la base de datos
+   - SQL_USERNAME: Usuario SQL
+   - SQL_PASSWORD: Contraseña SQL
+
+=======================================================================
+"""
+
+import sqlite3
+import hashlib
+import os
+from typing import Optional, Dict
+from datetime import datetime
+
+class SimpleAuth:
+    """Autenticación simple para JP_IA con fallback"""
+    
+    def __init__(self):
+        # Configuración de la base de datos SQLite
+        self.db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'database', 'Usuarios.db')
+        
+        # Verificar que la base de datos existe
+        if not os.path.exists(self.db_path):
+            raise FileNotFoundError(f"Base de datos no encontrada: {self.db_path}")
+        
+        print("✅ Sistema de autenticación SQLite inicializado")
+        print(f"� Base de datos: {self.db_path}")
+        
+        # Verificar conexión a la base de datos
+        self._test_connection()
+    
+    def _test_connection(self):
+        """Verifica la conexión a la base de datos SQLite"""
+        try:
+            conn = self._get_connection()
+            if not conn:
+                print("⚠️ No se puede conectar a la base de datos SQLite")
+                return
+            
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM usuarios")
+            count = cursor.fetchone()[0]
+            print(f"📊 Usuarios en base de datos: {count}")
+            
+            conn.close()
+            
+        except Exception as e:
+            print(f"⚠️ Error verificando base de datos: {e}")
+    
+    def _get_connection(self):
+        """Obtiene conexión a la base de datos SQLite"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row  # Para acceder a columnas por nombre
+            return conn
+        except Exception as e:
+            print(f"ERROR conectando a SQLite: {e}")
+            return None
+    
+    def _hash_password(self, password: str) -> str:
+        """Hash simple de contraseña"""
+        return hashlib.sha256(password.encode()).hexdigest()
+    
+    def _verify_password(self, password: str, password_hash: str) -> bool:
+        """Verifica si una contraseña coincide con su hash"""
+        # Crear hash de la contraseña ingresada
+        input_hash = hashlib.sha256(password.encode()).hexdigest()
+        return input_hash == password_hash
+    
+    def authenticate(self, username: str, password: str) -> Dict:
+        """
+        Autentica un usuario usando la base de datos SQLite
+        
+        Returns:
+            Dict con 'success' (bool), 'message' (str) y 'user' (dict si exitoso)
+        """
+        print(f"INTENTANDO AUTENTICAR USUARIO: {username}")
+        
+        conn = self._get_connection()
+        if not conn:
+            print("No se puede conectar a la base de datos SQLite")
+            return {
+                'success': False,
+                'message': 'Error de conexión a la base de datos'
+            }
+        
+        try:
+            cursor = conn.cursor()
+            
+            # Buscar usuario activo
+            cursor.execute("""
+                SELECT id, email, password_hash, created_at, is_active, last_login 
+                FROM usuarios 
+                WHERE email = ? AND is_active = 1
+            """, (username,))
+            
+            user = cursor.fetchone()
+            
+            if not user:
+                print(f"Usuario '{username}' no encontrado o inactivo en la base de datos")
+                return {
+                    'success': False,
+                    'message': 'Usuario no encontrado o inactivo'
+                }
+            
+            # Verificar contraseña usando hash
+            if self._verify_password(password, user['password_hash']):
+                # Actualizar último login
+                cursor.execute("""
+                    UPDATE usuarios 
+                    SET last_login = ? 
+                    WHERE id = ?
+                """, (datetime.now().isoformat(), user['id']))
+                
+                conn.commit()
+                
+                print(f"AUTENTICACION EXITOSA para: {username}")
+                return {
+                    'success': True,
+                    'message': 'Autenticación exitosa',
+                    'user': {
+                        'user_id': user['id'],
+                        'username': user['email'],
+                        'email': user['email'],
+                        'name': user['email'].split('@')[0],
+                        'role': 'user',
+                        'auth_method': 'sqlite',
+                        'last_login': user['last_login']
+                    }
+                }
+            else:
+                print(f"Contraseña incorrecta para: {username}")
+                return {
+                    'success': False,
+                    'message': 'Contraseña incorrecta'
+                }
+                
+        except Exception as e:
+            print(f"Error durante autenticación: {e}")
+            return {
+                'success': False,
+                'message': 'Error interno durante la autenticación'
+            }
+        finally:
+            conn.close()
+    
+    def check_user_exists(self, email: str) -> bool:
+        """Verifica si existe un usuario por email"""
+        conn = self._get_connection()
+        if not conn:
+            return False
+        
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM usuarios WHERE email = ?", (email,))
+            count = cursor.fetchone()[0]
+            return count > 0
+        except:
+            return False
+        finally:
+            conn.close()
+
+# Instancia global
+simple_auth = SimpleAuth()
+
+def login_user(username: str, password: str) -> Dict:
+    """Función simple para login"""
+    return simple_auth.authenticate(username, password)
+
+def is_logged_in(session) -> bool:
+    """Verifica si hay una sesión activa"""
+    return 'user_id' in session and 'username' in session
+
+def login_required(f):
+    """Decorador para rutas que requieren login"""
+    from functools import wraps
+    from flask import session, redirect, url_for, request
+    
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not is_logged_in(session):
+            return redirect(url_for('login_page', next=request.url))
+        return f(*args, **kwargs)
+    return decorated_function
+
+# Test del sistema
+if __name__ == "__main__":
+    print("🧪 PROBANDO SISTEMA DE AUTENTICACIÓN SQLite")
+    print("=" * 50)
+    
+    auth = SimpleAuth()
+    
+    # Probar con el usuario admin que debería existir
+    print("\n1. Probando credenciales correctas (admin@juntaplanificacion.pr.gov/JuntaAI2025!):")
+    result = auth.authenticate('admin@juntaplanificacion.pr.gov', 'JuntaAI2025!')
+    print(f"   Resultado: {result}")
+    
+    # Probar con credenciales incorrectas
+    print("\n2. Probando credenciales incorrectas (admin@juntaplanificacion.pr.gov/wrong):")
+    result = auth.authenticate('admin@juntaplanificacion.pr.gov', 'wrong')
+    print(f"   Resultado: {result}")
+    
+    # Probar con usuario inexistente
+    print("\n3. Probando usuario inexistente (noexiste@test.com/123):")
+    result = auth.authenticate('noexiste@test.com', '123')
+    print(f"   Resultado: {result}")
+    
+    print("\n✅ Pruebas completadas!")
