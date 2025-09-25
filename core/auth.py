@@ -73,15 +73,21 @@ class SimpleAuth:
         # Configuración de la base de datos SQLite
         self.db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'database', 'Usuarios.db')
         
-        # Verificar que la base de datos existe
+        # Crear directorio database si no existe
+        db_dir = os.path.dirname(self.db_path)
+        os.makedirs(db_dir, exist_ok=True)
+        
+        # Inicializar base de datos automáticamente si no existe
         if not os.path.exists(self.db_path):
-            raise FileNotFoundError(f"Base de datos no encontrada: {self.db_path}")
+            print(f"🔧 Creando base de datos de usuarios: {self.db_path}")
+            self._init_database()
         
         print("✅ Sistema de autenticación SQLite inicializado")
-        print(f"� Base de datos: {self.db_path}")
+        print(f"📁 Base de datos: {self.db_path}")
         
-        # Verificar conexión a la base de datos
+        # Verificar conexión y crear usuarios por defecto si es necesario
         self._test_connection()
+        self._ensure_default_users()
     
     def _test_connection(self):
         """Verifica la conexión a la base de datos SQLite"""
@@ -100,6 +106,71 @@ class SimpleAuth:
             
         except Exception as e:
             print(f"⚠️ Error verificando base de datos: {e}")
+    
+    def _init_database(self):
+        """Crea la base de datos y las tablas necesarias"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Crear tabla de usuarios
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS usuarios (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    email TEXT UNIQUE NOT NULL,
+                    password_hash TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_login TIMESTAMP,
+                    is_active BOOLEAN DEFAULT 1
+                )
+            """)
+            
+            conn.commit()
+            conn.close()
+            print("✅ Base de datos de usuarios creada exitosamente")
+            
+        except Exception as e:
+            print(f"❌ Error creando base de datos: {e}")
+            raise
+    
+    def _ensure_default_users(self):
+        """Asegura que existan los usuarios por defecto"""
+        default_users = [
+            ("admin@juntaplanificacion.pr.gov", "admin123"),
+            ("melendez_ma@jp.pr.gov", "admin123")
+        ]
+        
+        conn = self._get_connection()
+        if not conn:
+            print("❌ No se puede conectar para crear usuarios por defecto")
+            return
+        
+        try:
+            cursor = conn.cursor()
+            
+            for email, password in default_users:
+                # Verificar si el usuario ya existe
+                cursor.execute("SELECT COUNT(*) FROM usuarios WHERE email = ?", (email,))
+                exists = cursor.fetchone()[0] > 0
+                
+                if not exists:
+                    # Crear el usuario
+                    password_hash = self._hash_password(password)
+                    cursor.execute("""
+                        INSERT INTO usuarios (email, password_hash, is_active)
+                        VALUES (?, ?, 1)
+                    """, (email, password_hash))
+                    print(f"✅ Usuario creado: {email}")
+                else:
+                    print(f"👤 Usuario ya existe: {email}")
+            
+            conn.commit()
+            conn.close()
+            
+        except Exception as e:
+            print(f"❌ Error creando usuarios por defecto: {e}")
+            if conn:
+                conn.close()
     
     def _get_connection(self):
         """Obtiene conexión a la base de datos SQLite"""
