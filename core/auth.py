@@ -1,9 +1,12 @@
 """
 =======================================================================
-AUTH.PY - SISTEMA DE AUTENTICACIÓN SQLite PARA JP_LEGALBOT v3.2
+AUTH.PY - SISTEMA DE AUTENTICACIÓN SQLite PARA JP_LEGALBOT v3.2 
 =======================================================================
 Sistema de autenticación basado en SQLite que se inicializa automáticamente
 en Render y crea usuarios por defecto.
+
+🆕 VERSIÓN ACTUALIZADA - 25/SEP/2025 - SIN SQL SERVER
+100% SQLite - Sin fallbacks - Inicialización automática garantizada
 =======================================================================
 """
 
@@ -29,8 +32,10 @@ class SimpleAuth:
             print(f"🔧 Creando base de datos de usuarios: {self.db_path}")
             self._init_database()
         
+        print("🚨 NUEVA VERSIÓN AUTH.PY - 25/SEP/2025 - 100% SQLite")
         print("✅ Sistema de autenticación SQLite inicializado")
         print(f"📁 Base de datos: {self.db_path}")
+        print("🔥 NO MORE SQL SERVER - SQLITE ONLY!")
         
         # Verificar conexión y crear usuarios por defecto si es necesario
         self._test_connection()
